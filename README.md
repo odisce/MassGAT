@@ -1,61 +1,42 @@
-# MassGAT: a graph-based collective learning approach for untargeted detection and annotation of LC-MS data
+# MassGAT
+
+**MassGAT** is a graph-based collective learning framework for untargeted detection and annotation of LC-HRMS data. By modeling LC-MS files as hierarchical graphs where nodes represent ion traces and edges represent chemical relationships (isotopes, adducts, dimers), MassGAT performs simultaneous peak detection and grouping, leveraging analytical redundancy to rescue valid, low-intensity signals.
+
+![MassGAT Pipeline ](docs/pipeline_schematic.png)
+*(MassGAT Pipeline: Raw .mzML → IonShed Traces → Graph Topology → Annotated Components)*
+
+## Table of Contents
+- [Requirements](#requirements)
+- [Installation](#installation)
+  - [Option A: HPC / Slurm (Recommended)](#option-a-hpc--slurm-recommended)
+  - [Option B: Local Workstation](#option-b-local-workstation-linuxmacoswindows)
+- [Usage](#usage)
+  - [Interactive Tutorial](#interactive-tutorial)
+  - [Command Line Interface (CLI)](#command-line-interface-cli)
+- [Repository Structure](#repository-structure)
+- [Citation](#citation)
+
+## Requirements
+
+* **Servers:** Singularity or Apptainer.
+* **Local :** [Miniforge](https://github.com/conda-forge/miniforge) or Miniconda.
 
 
-## 1. Project Overview
-MassGAT is a **Graph Neural Network (GNN)** framework for LC-MS1 data processing. It performs **peak validation** by a collective learning approach, taking advantage of analytical redundancy.
+## Installation (Local)
 
-* **Input:** Raw LC-MS data converted into ROIs (Regions of Interest).
-* **Graph Construction:** Nodes = ROIs; Edges = Chemical relationships ($\Delta m/z$ + correlation).
-* **Task:** Multi-task classification (Node Real/Noise, Edge Valid/Invalid, Component Real/Noise).
-
----
-
-
----
-
-## 2. Repository Structure
-
-```text
-.
-├── scripts/          # Main scripts (train, predict)
-├── Rscripts/         # R scripts for data processing (Ionshed, XCMS, CliqueMS)
-├── src/              # Source code
-│   ├── data/         # Data loading and synthetic generation
-│   ├── models/       # Neural network architecture
-│   ├── training/     # Training logic and loss functions
-│   └── utils/        # Utility functions (annotation, visualization)
-├── Dockerfile        # Container configuration
-├── requirements.txt  # Python dependencies
-└── LICENSE           # License
+First, clone the repository:
+```bash
+git clone https://github.com/odisce/MassGAT.git
+cd MassGAT
 ```
 
 
-## Setup
+### Option A: Singularity / Docker
 
 
+### Option B : Local (Linux/MacOS/Windows)
 
-## Configuration
-
-Key parameters in `config.yaml`:
-```yaml
-# Model architecture
-hidden_channels: 64
-embedding_dim: 64
-gnn_layers: 3
-
-# Training
-learning_rate: 0.0003
-epochs: 30
-alpha: 1.0  # Binary loss weight
-beta: 1.0   # Clustering loss weight
-
-# Memory management
-max_nodes_per_graph: 50000
-use_attention: true
+```bash
+conda create --name massgat_env python=3.10 --channel conda-forge --override-channels -y
+conda activate massgat_env
 ```
-
-## Dependencies
-
-Install with: `pip install -r requirements.txt`
-
-Main ones: PyTorch, PyTorch Geometric, pandas, scikit-learn, plotly, jupyter

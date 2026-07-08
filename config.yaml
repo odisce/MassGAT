@@ -1,0 +1,36 @@
+# MassGAT Configuration File
+# This file contains all user-tunable parameters for graph construction, model architecture, and training
+
+# Graph Construction Parameters
+graph:
+  rt_window: 5.0                    # Retention time window in seconds for finding neighbors
+  mz_tolerance: 0.001               # m/z tolerance in Da for mass difference edges
+  min_signals: 8                    # Minimum number of signals required per ROI
+  eic_len: 32                       # Fixed length for EIC vectors after interpolation
+
+# Correlation Thresholds (tune for linking behavior)
+thresholds:
+  isotope_corr: 0.6                # Correlation threshold for isotope linking
+  adduct_corr: 0.9                 # Correlation threshold for adduct linking
+  dimer_corr: 0.85                 # Correlation threshold for dimer linking
+  isotope_37cl_ratio: 0.2          # 37Cl isotope minimum intensity ratio
+
+# Model Architecture
+model:
+  hidden_channels: 64              # Hidden dimension for GNN layers
+  embedding_dim: 64                # Embedding dimension
+  gnn_layers: 3                    # Number of GNN layers
+  use_attention: true              # Use attention mechanism in GNN
+
+# Training Parameters
+training:
+  learning_rate: 0.0003            # Adam optimizer learning rate
+  epochs: 30                       # Number of training epochs
+  alpha: 1.0                       # Weight for node classification loss
+  beta: 1.0                        # Weight for clustering/edge loss
+  batch_size: 32                   # Training batch size
+
+# System Configuration
+system:
+  random_seed: 42                  # Random seed for reproducibility
+  device: auto                     # Device to use: 'cuda', 'cpu', or 'auto' (detect GPU)

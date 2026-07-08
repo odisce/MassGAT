@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "massgat"
+version = "0.1.0"
+description = "MassGAT: a graph-based collective learning approach for untargeted detection and annotation of LC-MS data"
+readme = "README.md"
+requires-python = ">=3.8,<3.11"
+license = {text = "MIT"}
+keywords = ["machine-learning", "graph-neural-networks", "lc-ms", "metabolomics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "pandas>=1.5.0",
+    "numpy>=1.22.0,<2.0.0", 
+    "scipy>=1.8.0",
+    "scikit-learn>=1.0.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+    "torch>=2.0.0,<2.2.0", 
+    "torch-geometric>=2.3.0",
+    "pyyaml",
+    "tqdm",
+    "numba",
+    "openpyxl",
+    "pyarrow",
+    "mlflow",
+    "plotly",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "flake8>=4.0",
+    "isort>=5.0",
+    "mypy>=0.950",
+]
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0",
+]
+
+# Note: R packages (xcms, MSnbase, ionshed) must be installed separately (use the Dockerfile or install via R directly)
+
+[project.urls]
+Repository = "https://github.com/odisce/MassGAT"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

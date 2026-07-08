@@ -4,6 +4,11 @@ Graph augmentation and subsampling
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
+from src.config import (
+    IDX_LOG_INTO, IDX_LOG_IMAX, IDX_MZ_FLOAT,
+    START_INT_SEQ, END_INT_SEQ,
+    IDX_EDGE_INTO_RATIO, IDX_EDGE_IMAX_RATIO
+)
 
 
 def augment_graph(data, aug_type="mixed", intensity_noise_scale=0.2,
@@ -28,13 +33,13 @@ def augment_graph(data, aug_type="mixed", intensity_noise_scale=0.2,
     edge_index = data.edge_index.clone()
     
     # [mz, rt, log_into, rtmin, rtmax, log_imax, mz_float, sc_len, ...seqs...]
-    idx_log_into = 2
-    idx_log_imax = 5
-    idx_mz_float = 6
-    start_int_seq, end_int_seq = 40, 72
+    idx_log_into = IDX_LOG_INTO
+    idx_log_imax = IDX_LOG_IMAX
+    idx_mz_float = IDX_MZ_FLOAT
+    start_int_seq, end_int_seq = START_INT_SEQ, END_INT_SEQ
     
-    idx_edge_into_ratio = -3 
-    idx_edge_imax_ratio = -2
+    idx_edge_into_ratio = IDX_EDGE_INTO_RATIO
+    idx_edge_imax_ratio = IDX_EDGE_IMAX_RATIO
 
     # 1. intensity jitter
     if aug_type in ["intensity", "mixed"]:

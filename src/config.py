@@ -25,6 +25,34 @@ RANDOM_SEED = 42
 # Device configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Feature vector indices (Node feature organization)
+# Feature vector layout: [mz, rt, log_into, rtmin, rtmax, log_imax, mz_float, sc_len, ...seqs...]
+IDX_LOG_INTO = 2              # Index of log(intensity) feature
+IDX_LOG_IMAX = 5              # Index of log(max intensity) feature
+IDX_MZ_FLOAT = 6              # Index of m/z float feature
+START_INT_SEQ = 40            # Start index of intensity sequence (EIC profile)
+END_INT_SEQ = 72              # End index of intensity sequence (EIC profile)
+NUM_INT_SEQ = END_INT_SEQ - START_INT_SEQ  # Length of intensity sequence = 32
+
+# Edge feature indices
+IDX_EDGE_INTO_RATIO = -3      # Edge intensity ratio (relative indexing)
+IDX_EDGE_IMAX_RATIO = -2      # Edge max intensity ratio (relative indexing)
+
+# Data augmentation parameters
+INTENSITY_NOISE_SCALE = 0.2   # Scale for intensity jitter augmentation
+RT_SHIFT_SCALE = 0.5          # Scale for retention time shift augmentation
+MASS_JITTER_SCALE = 5e-6      # Scale for mass jitter augmentation
+PROFILE_NOISE_STD = 0.1       # Std for profile Gaussian noise
+FEATURE_MASK_PROB = 0.05      # Probability of feature masking (5% of nodes)
+SPIKE_PROB = 0.1              # Probability of spike noise
+
+# Model inference parameters
+BATCH_SIZE_INFERENCE = 64     # Batch size for inference/prediction
+
+# Progress and logging
+SHOW_PROGRESS_BARS = True     # Enable/disable tqdm progress bars
+ASSEMBLY_LOG_EVERY = 100      # Log assembly progress every N graphs
+LIMIT_TIME = 0                # Time limit for graph processing (0 = no limit)
 
 # Common mass differences for isotopes (same for both modes)
 from pathlib import Path

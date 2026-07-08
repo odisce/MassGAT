@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from src.models import BaselineHierarchicalGNN, MassGAT, IndependentPeakClassifier
+from src.models import MassGAT, IndependentPeakClassifier
 from src.data.loader import load_single_synthetic_file, load_mzml_file
 from src.data.single_loader import SinglePeakDataset, extract_peaks_from_pt
 from src.training.trainer import ChroMSTrainer
@@ -36,6 +36,44 @@ def _count_csv_data_rows(csv_path):
         return 0
     return max(0, line_count - 1)
 
+def _load_roi_mzmin_mzmax_mapping(ionshed_output_dir, file_name):
+    """Load mzmin/mzmax from ionshed feather file, matched by pt filename."""
+    if ionshed_output_dir is None or not os.path.isdir(ionshed_output_dir):
+        return {}
+    
+    # Remove .pt extension
+    base_name = os.path.splitext(file_name)[0]
+    
+    # Strip "graph_" prefix if present (common in graph files)
+    if base_name.startswith('graph_'):
+        base_name = base_name[len('graph_'):]
+    
+    # If base_name ends with "_signal", replace it with "_peak"
+    # Otherwise, just append "_peak"
+    if base_name.endswith('_signal'):
+        peak_base = base_name[:-len('_signal')] + '_peak'
+    else:
+        peak_base = base_name + '_peak'
+    
+    feather_path = os.path.join(ionshed_output_dir, f"{peak_base}.feather")
+    
+    if not os.path.isfile(feather_path):
+        return {}
+    
+    try:
+        df = pd.read_feather(feather_path)
+        
+        # Create mapping: roi -> (mzmin, mzmax)
+        roi_mapping = {}
+        if 'roi' in df.columns and 'mzmin' in df.columns and 'mzmax' in df.columns:
+            for _, row in df.iterrows():
+                roi_id = int(row['roi'])
+                roi_mapping[roi_id] = (float(row['mzmin']), float(row['mzmax']))
+        return roi_mapping
+    except Exception as e:
+        print(f"[DEBUG] Failed to load ROI mapping from {feather_path}: {e}")
+        return {}
+
 def main(args):
     folder_path = args.folder
     weights_path = args.weights
@@ -52,6 +90,7 @@ def main(args):
     skip_metadata = args.skip_metadata
     skip_top_annotations = args.skip_top_annotations
     zero_metadata_all_nodes = args.zero_metadata_all_nodes
+    ionshed_output_dir = args.ionshed_output_dir
     
     # timestamp for output file name (microseconds + pid to avoid collisions)
     timestamp = pd.to_datetime('now').strftime('%Y%m%d_%H%M%S_%f')
@@ -108,7 +147,8 @@ def main(args):
                 for pt_file in pt_files:
                     pt_path = os.path.join(folder_path, pt_file)
                     peaks = extract_peaks_from_pt(pt_path)
-                    batch_size = 64
+                    from src.config import BATCH_SIZE_INFERENCE
+                    batch_size = BATCH_SIZE_INFERENCE
                     all_x = [x for x, roi_id in peaks]
                     all_roi = [roi_id for x, roi_id in peaks]
                     num_peaks = len(all_x)
@@ -133,7 +173,8 @@ def main(args):
                 return
         elif folder_path.endswith('.pt') and os.path.isfile(folder_path):
             peaks = extract_peaks_from_pt(folder_path)
-            batch_size = 64
+            from src.config import BATCH_SIZE_INFERENCE
+            batch_size = BATCH_SIZE_INFERENCE
             all_x = [x for x, roi_id in peaks]
             all_roi = [roi_id for x, roi_id in peaks]
             num_peaks = len(all_x)
@@ -191,6 +232,12 @@ def main(args):
     unique_files = list(dict.fromkeys(file_names))
     file_to_sample_idx = {fname: idx + 1 for idx, fname in enumerate(unique_files)}
 
+    # Pre-load ROI mappings from ionshed feather files
+    file_to_roi_mapping = {}
+    if data_type == 'real' and ionshed_output_dir:
+        for fname in unique_files:
+            file_to_roi_mapping[fname] = _load_roi_mzmin_mzmax_mapping(ionshed_output_dir, fname)
+
     # Instantiate model
     model_kwargs = dict(
         num_features=72,
@@ -200,12 +247,9 @@ def main(args):
         block_type=block_type,
         zero_metadata_all_nodes=zero_metadata_all_nodes,
     )
-    if model_type == 'baseline_gnn':
-        model = BaselineHierarchicalGNN(**model_kwargs)
-    elif model_type == 'iterative':
-        model = MassGAT(**model_kwargs)
-    else:
-        raise ValueError('Unknown model_type')
+    
+    model = MassGAT(**model_kwargs)
+
 
     # Load weights
     model.load_state_dict(_load_state_dict(weights_path))
@@ -223,41 +267,23 @@ def main(args):
     # Stream CSV writes
     assembly_start = time.time()
     metadata_output_csv = str(target_tsv.with_name(f"{target_tsv.stem}_metadata.tsv"))
-    edges_output_csv = str(target_tsv.with_name(f"{target_tsv.stem}_edges.tsv"))
 
-    pred_fields = ['file_name', 'component_id', 'roi_ids', 'num_peaks', 'graph_prob', 'node_probs']
     # XCMS compatible headers
     meta_fields = ['mz', 'mzmin', 'mzmax', 'rt', 'rtmin', 'rtmax', 'into', 'maxo', 'sample', 
-                   'file_name', 'component_id', 'roi_id', 'node_prob', 'graph_prob'] +                   [f'top_annotation_{k+1}' for k in range(5)]
-    edge_fields = ['file_names', 'edge_index', 'edge_probs']
+                   'file_name', 'component_id', 'roi_id', 'node_prob', 'graph_prob'] + [f'top_annotation_{k+1}' for k in range(5)]
 
-    n_pred_rows = 0
     n_meta_rows = 0
-    n_edge_rows = 0
     t_annotations = 0.0
     t_metadata = 0.0
-    t_edges = 0.0
 
-    with open(output_csv, 'w', newline='') as pred_f, open(edges_output_csv, 'w', newline='') as edge_f:
-        # Added delimiter='\t' for all writers
-        pred_writer = csv.DictWriter(pred_f, fieldnames=pred_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
-        edge_writer = csv.DictWriter(edge_f, fieldnames=edge_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
-        pred_writer.writeheader()
-        edge_writer.writeheader()
+    metadata_cm = open(metadata_output_csv, 'w', newline='')
+    meta_writer = csv.DictWriter(metadata_cm, fieldnames=meta_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
+    meta_writer.writeheader()
 
-        if skip_metadata:
-            metadata_cm = None
-            meta_writer = None
-        else:
-            metadata_cm = open(metadata_output_csv, 'w', newline='')
-            meta_writer = csv.DictWriter(metadata_cm, fieldnames=meta_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
-            meta_writer.writeheader()
-
+    try:
         total_files = len(file_names)
         assembly_log_every = max(1, total_files // 20)  # every 5%
-
-        try:
-            for i, fname in enumerate(file_names):
+        for i, fname in enumerate(file_names):
                 pred = predictions.get(i, {})
                 data_obj = graphs[i]
 
@@ -323,8 +349,9 @@ def main(args):
                         print(f"Annotation error in component {component_id}: {e}")
                     t_annotations += time.perf_counter() - ann_start
 
-                if not skip_metadata and meta_writer is not None:
+                if meta_writer is not None:
                     meta_start = time.perf_counter()
+                    roi_mzmin_mzmax_map = file_to_roi_mapping.get(fname, {})
                     if data_type == 'real':
                         mz_vals = (node_features[:, 0] * 1000 + node_features[:, 6]).detach().cpu().numpy()
                         rt_vals = (node_features[:, 1] * 1800).detach().cpu().numpy()
@@ -360,10 +387,15 @@ def main(args):
                             else:
                                 top_ann_cols[f'top_annotation_{k+1}'] = ''
 
+                        mzmin_v = mz_v
+                        mzmax_v = mz_v
+                        if int(roi) in roi_mzmin_mzmax_map:
+                            mzmin_v, mzmax_v = roi_mzmin_mzmax_map[int(roi)]
+
                         meta_writer.writerow({
                             'mz': float(mz_v),
-                            'mzmin': float(mz_v),
-                            'mzmax': float(mz_v),
+                            'mzmin': mzmin_v,
+                            'mzmax': mzmax_v,
                             'rt': float(rt_v),
                             'rtmin': float(rtmin_v) if not np.isnan(rtmin_v) else float(rt_v),
                             'rtmax': float(rtmax_v) if not np.isnan(rtmax_v) else float(rt_v),
@@ -380,40 +412,6 @@ def main(args):
                         n_meta_rows += 1
                     t_metadata += time.perf_counter() - meta_start
 
-                node_probs_str = str(node_probs_arr.tolist())
-                pred_writer.writerow({
-                    'file_name': fname,
-                    'component_id': component_id,
-                    'roi_ids': str(roi_ids),
-                    'num_peaks': num_peaks,
-                    'graph_prob': graph_prob,
-                    'node_probs': node_probs_str
-                })
-                n_pred_rows += 1
-
-                edge_start = time.perf_counter()
-                edge_index = pred.get('edge_index', None)
-                edge_probs = pred.get('edge_probs', None)
-                if edge_index is not None and edge_probs is not None:
-                    try:
-                        ei = np.array(edge_index)
-                        for k in range(ei.shape[0]):
-                            u = int(ei[k, 0])
-                            v = int(ei[k, 1])
-                            p = float(edge_probs[k])
-                            edge_writer.writerow({'file_names': fname, 'edge_index': str([u, v]), 'edge_probs': p})
-                            n_edge_rows += 1
-                    except Exception:
-                        try:
-                            for idx, p in zip(edge_index, edge_probs):
-                                u = int(idx[0])
-                                v = int(idx[1])
-                                edge_writer.writerow({'file_names': fname, 'edge_index': str([u, v]), 'edge_probs': float(p)})
-                                n_edge_rows += 1
-                        except Exception:
-                            pass
-                t_edges += time.perf_counter() - edge_start
-
                 done = i + 1
                 if done % assembly_log_every == 0 or done == total_files:
                     elapsed = time.time() - assembly_start
@@ -423,31 +421,11 @@ def main(args):
                     print(f"[assembly] {pct:.0f}% ({done}/{total_files}) | "
                         f"{rate:.0f} rows/s | elapsed {elapsed:.1f}s | eta {remaining:.1f}s")
                         
-        finally:
-            if metadata_cm is not None:
-                metadata_cm.close()
-
-        pred_f.flush()
-        os.fsync(pred_f.fileno())
-        edge_f.flush()
-        os.fsync(edge_f.fileno())
-
-    written_pred_rows = _count_csv_data_rows(output_csv)
-    if written_pred_rows != n_pred_rows:
-        print(
-            f'WARNING: predicted rows counter ({n_pred_rows}) does not match rows present in file ({written_pred_rows}).'
-        )
+    finally:
+        metadata_cm.close()
 
     total_assembly = time.time() - assembly_start
-    if not skip_metadata:
-        print(f'Metadata saved to {metadata_output_csv} with {n_meta_rows} rows. Processed in {t_metadata:.2f}s.')
-    else:
-        print('Metadata export skipped (--skip_metadata).')
-    print(f'Predictions saved to {output_csv} with {n_pred_rows} rows.')
-    if n_edge_rows > 0:
-        print(f'Edge predictions saved to {edges_output_csv} with {n_edge_rows} rows. Processed in {t_edges:.2f}s.')
-    else:
-        print('No edge predictions available to save.')
+    print(f'Metadata saved to {metadata_output_csv} with {n_meta_rows} rows. Processed in {t_metadata:.2f}s.')
     print(f'Annotation total time: {t_annotations:.2f}s.')
     print(f'CSV assembly completed in {total_assembly:.2f} seconds.')
 
@@ -476,6 +454,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_node_prob', type=float, default=0.0, help='Keep peaks with node_prob >= threshold')
     parser.add_argument('--min_graph_prob', type=float, default=0.5, help='Keep peaks in components with graph_prob >= threshold')
     parser.add_argument('--max_annotation_size', type=int, default=200, help='Skip annotation for components larger than this to prevent bottleneck')
+    parser.add_argument('--ionshed_output_dir', type=str, default=None, help='Path to ionshed output directory containing _peak.feather files')
     
     args = parser.parse_args()
     main(args)
