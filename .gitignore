@@ -8,7 +8,6 @@ weights/**
 *.pth
 *.pt
 *.pyc
-*.png
 *.npy
 *.npz
 *.csv

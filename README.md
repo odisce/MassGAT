@@ -2,8 +2,8 @@
 
 **MassGAT** is a graph-based collective learning framework for untargeted detection and annotation of LC-HRMS data. By modeling LC-MS files as hierarchical graphs where nodes represent ion traces and edges represent chemical relationships (isotopes, adducts, dimers), MassGAT performs simultaneous peak detection and grouping, leveraging analytical redundancy to rescue valid, low-intensity signals.
 
-![MassGAT Pipeline ](docs/pipeline_schematic.png)
-*(MassGAT Pipeline: Raw .mzML → IonShed Traces → Graph Topology → Annotated Components)*
+![MassGAT Pipeline ](docs/massgat_overview.png)
+
 
 ## Table of Contents
 - [Requirements](#requirements)
