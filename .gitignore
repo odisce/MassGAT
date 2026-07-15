@@ -1,11 +1,3 @@
-data/**
-dataset/**
-test_dataset/**
-mlruns/**
-logs/**
-results/**
-weights/**
-*.pth
 *.pt
 *.pyc
 *.npy
@@ -13,7 +5,4 @@ weights/**
 *.csv
 *.svg
 *.html
-*.pdf
 __pycache__/
-pbs/*.out
-pbs/*.err

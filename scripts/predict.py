@@ -451,8 +451,8 @@ if __name__ == '__main__':
     parser.add_argument('--with_top_annotations', dest='skip_top_annotations', action='store_false')
     
     # New options for filtering and optimization
-    parser.add_argument('--min_node_prob', type=float, default=0.0, help='Keep peaks with node_prob >= threshold')
-    parser.add_argument('--min_graph_prob', type=float, default=0.5, help='Keep peaks in components with graph_prob >= threshold')
+    parser.add_argument('--min_node_prob', type=float, default=0.5, help='Keep peaks with node_prob >= threshold')
+    parser.add_argument('--min_graph_prob', type=float, default=0.0, help='Keep peaks in components with graph_prob >= threshold')
     parser.add_argument('--max_annotation_size', type=int, default=200, help='Skip annotation for components larger than this to prevent bottleneck')
     parser.add_argument('--ionshed_output_dir', type=str, default=None, help='Path to ionshed output directory containing _peak.feather files')
     

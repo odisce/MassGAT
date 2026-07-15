@@ -17,11 +17,6 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 from src import config
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-# Build edge type name mappings (number -> name)
 def build_edge_names(diff_dicts):
     """Build mapping from edge type numbers to names."""
     names = {}
@@ -82,23 +77,31 @@ def short_label(edge_name):
             return edge_name[len(prefix):]
     return edge_name[:6]
 
-# ============================================================================
-# GRAPH CONSTRUCTION
-# ============================================================================
-
-def create_nx_graph(torch_graph, ionization_mode='positive'):
-    """Convert PyTorch graph to NetworkX graph."""
+def create_nx_graph(graph, ionization_mode='positive', node_probs=None, 
+                    file_name=None, prob_threshold=0.5):
+    """
+    Convert PyTorch graph to NetworkX graph, filtering out nodes 
+    with probability < prob_threshold.
+    """
     edge_names = EDGE_TYPE_NAMES_POSITIVE if ionization_mode == 'positive' else EDGE_TYPE_NAMES_NEGATIVE
     G = nx.Graph()
     
-    # Get ROI values and create mapping
-    roi_values = torch_graph['roi_values']
+    roi_values = graph['roi_values']
     roi_to_idx = {roi_values[i].item(): i for i in range(len(roi_values))}
     
-    # Add nodes
-    node_features = torch_graph['node_features']
+    # 1. Identify Valid Nodes first
+    valid_nodes = set()
+    node_features = graph['node_features']
     for i in range(len(roi_values)):
         roi = roi_values[i].item()
+        
+        # Check probability if provided
+        if node_probs is not None and file_name is not None:
+            prob = node_probs.get((file_name, roi), 0.0)
+            if prob < prob_threshold:
+                continue
+        
+        valid_nodes.add(i)
         features = node_features[i, :8].numpy()
         G.add_node(i, 
             roi=roi, mz=features[0], rt=features[1], intensity=features[2],
@@ -106,26 +109,24 @@ def create_nx_graph(torch_graph, ionization_mode='positive'):
             mzmean=features[6], scan_length=features[7]
         )
     
-    # Add edges
-    if 'edge_index' in torch_graph and 'edge_attr' in torch_graph:
-        edge_index = torch_graph['edge_index'].numpy()
-        edge_attr = torch_graph['edge_attr'].numpy()
+    # 2. Add edges only if BOTH nodes are in valid_nodes
+    if 'edge_index' in graph and 'edge_attr' in graph:
+        edge_index = graph['edge_index'].numpy()
+        edge_attr = graph['edge_attr'].numpy()
         
         for i in range(edge_index.shape[1]):
             source_roi, target_roi = edge_index[0, i].item(), edge_index[1, i].item()
             source_idx = roi_to_idx.get(source_roi)
             target_idx = roi_to_idx.get(target_roi)
             
-            if source_idx is not None and target_idx is not None:
+            # Only add edge if both endpoints are valid
+            if source_idx in valid_nodes and target_idx in valid_nodes:
+                cosine_sim = edge_attr[i, 0].item() if edge_attr.shape[1] > 0 else None
                 edge_type = edge_attr[i, 1].item() if edge_attr.shape[1] > 1 else 0
                 edge_name = edge_names.get(edge_type, f'unknown_{edge_type}')
-                G.add_edge(source_idx, target_idx, type=edge_type, name=edge_name)
+                G.add_edge(source_idx, target_idx, type=edge_type, name=edge_name, cosine_similarity=cosine_sim)
     
     return G
-
-# ============================================================================
-# VISUALIZATION HELPERS
-# ============================================================================
 
 def get_midpoint(pos, u, v, layout, intensities_are_log):
     """Calculate midpoint of an edge."""
@@ -214,10 +215,6 @@ def style_config(style='presentation'):
         'max_edge_labels': 80, 'min_sep': 0.045
     }
 
-# ============================================================================
-# PROFILE EXTRACTION
-# ============================================================================
-
 def compute_node_profiles(node_features, nodes):
     """Extract normalized RT/intensity profiles for a set of nodes.
 
@@ -248,15 +245,10 @@ def compute_node_profiles(node_features, nodes):
         intensity_normalized = intensity_no_padding / np.max(intensity_no_padding)
         profiles[node] = {
             "rt": rt_no_padding.tolist(),
-            "intensity_raw": intensity_no_padding.tolist(),         # NEW
-            "intensity_norm": intensity_normalized.tolist()         # NEW
+            "intensity_raw": intensity_no_padding.tolist(),
+            "intensity_norm": intensity_normalized.tolist()
         }
     return profiles
-
-# ============================================================================
-# STATIC EXPORT
-# ============================================================================
-
 def save_static(G, subgraph, nodes, pos, low_prob_nodes, node_data, 
                 layout, intensities_are_log, title, edge_names,
                 use_prob_styling, low_prob_opacity, prob_colorscale,
@@ -462,10 +454,6 @@ def save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data,
     plt.close(fig)
     print(f'Combined static figure saved → {filepath}')
 
-# ============================================================================
-# MAIN VISUALIZATION FUNCTION
-# ============================================================================
-
 def visualize_component(G, nodes, title='Component Visualization',
                        layout='spatial', highlight_nodes=None,
                        show_edge_labels=True, save_html=None, static_filepath=None,
@@ -627,7 +615,6 @@ def visualize_component(G, nodes, title='Component Visualization',
         x=mid_x_list, 
         y=mid_y_list,
         mode='markers',
-        # FIX: Use transparent rgba color instead of opacity=0
         marker=dict(size=20, color='rgba(0,0,0,0)'), 
         hovertext=mid_hover_text,
         hovertemplate='%{hovertext}<extra></extra>',
@@ -644,9 +631,9 @@ def visualize_component(G, nodes, title='Component Visualization',
         if grad_idx:
             node_traces.append(go.Scatter(
                 x=[node_x[i] for i in grad_idx], y=[node_y[i] for i in grad_idx],
-                mode='markers+text', # NEW
-                text=[str(nodes[i]) for i in grad_idx], # NEW
-                textposition='middle center', textfont=text_cfg, # NEW
+                mode='markers+text',
+                text=[str(nodes[i]) for i in grad_idx],
+                textposition='middle center', textfont=text_cfg,
                 marker=dict(
                     size=node_size, color=[node_colors[i] for i in grad_idx],
                     colorscale=prob_colorscale, cmin=0, cmax=1,
@@ -678,9 +665,9 @@ def visualize_component(G, nodes, title='Component Visualization',
     else:
         node_traces.append(go.Scatter(
             x=node_x, y=node_y,
-            mode='markers+text', # NEW
-            text=[str(n) for n in nodes], # NEW
-            textposition='middle center', textfont=text_cfg, # NEW
+            mode='markers+text',
+            text=[str(n) for n in nodes],
+            textposition='middle center', textfont=text_cfg,
             marker=dict(size=node_size, color=node_colors, line=dict(width=1, color='white')),
             hovertemplate='%{hovertext}<extra></extra>', hovertext=hover_text,
             customdata=list(nodes), name='Nodes'
@@ -695,14 +682,11 @@ def visualize_component(G, nodes, title='Component Visualization',
         import matplotlib.colors as mcolors
 
         profiles = compute_node_profiles(node_features, nodes)
-        
-        # Use categorical palette like save_static_combined does
         profile_cmap = plt.get_cmap('tab10')
         
         for i, n in enumerate(nodes):
             if n in profiles:
-                profiles[n]['is_low'] = node_data[i][3]  # is_low flag
-                # Use categorical color (index-based) instead of probability-based
+                profiles[n]['is_low'] = node_data[i][3]
                 profiles[n]['color'] = mcolors.to_hex(profile_cmap(i % 10))
         
         initial_nodes = [n for n in nodes if n in manual_highlights and n in profiles]
@@ -717,10 +701,9 @@ def visualize_component(G, nodes, title='Component Visualization',
                                  static_combined_filepath, profiles, nodes_to_plot, 
                                  style, xlim, highlight_nodes=manual_highlights)
 
-        # Adjust the space ratio
         fig = make_subplots(
-            rows=1, cols=2, column_widths=[0.65, 0.35], # Gave profiles slightly more room
-            subplot_titles=('Pseudospectrum', 'Elution Profiles'), # NEW TITLES
+            rows=1, cols=2, column_widths=[0.65, 0.35],
+            subplot_titles=('Pseudospectrum', 'Elution Profiles'),
             horizontal_spacing=0.04
         )
         for trace in graph_traces:
@@ -779,7 +762,7 @@ def visualize_component(G, nodes, title='Component Visualization',
         hovermode='closest',
         margin=dict(b=20, l=5, r=5, t=40),
         plot_bgcolor='white',
-        autosize=True,         # FIX: Replaces the hardcoded 2400/1800 width
+        autosize=True,
         height=900,
         xaxis=dict(
             showgrid=True, 
@@ -799,8 +782,6 @@ def visualize_component(G, nodes, title='Component Visualization',
     if save_html:
         if build_profiles:
             import json
-            # Profiles for ALL nodes (not just initial_nodes) are embedded so any
-            # node can be clicked on later, not just the ones shown at load time.
             profiles_json = json.dumps({str(k): v for k, v in profiles.items()})
             initial_json = json.dumps([str(n) for n in initial_nodes])
             click_js = f"""

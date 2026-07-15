@@ -13,7 +13,7 @@ MIN_SIGNALS = 8
 
 # Hierarchical correlation thresholds
 ISOTOPE_CORR_THRESHOLD = 0.6
-ADDUCT_CORR_THRESHOLD = 0.9
+ADDUCT_CORR_THRESHOLD = 0.85
 DIMER_CORR_THRESHOLD = 0.85
 
 # Extra isotope validation constraints
@@ -49,10 +49,6 @@ SPIKE_PROB = 0.1              # Probability of spike noise
 # Model inference parameters
 BATCH_SIZE_INFERENCE = 64     # Batch size for inference/prediction
 
-# Progress and logging
-SHOW_PROGRESS_BARS = True     # Enable/disable tqdm progress bars
-ASSEMBLY_LOG_EVERY = 100      # Log assembly progress every N graphs
-LIMIT_TIME = 0                # Time limit for graph processing (0 = no limit)
 
 # Common mass differences for isotopes (same for both modes)
 from pathlib import Path
