@@ -19,7 +19,7 @@
 ## Requirements
 
 * **Servers:** Singularity or Apptainer.
-* **Local :** [Miniforge](https://github.com/conda-forge/miniforge) or Miniconda + R
+* **Local :** Miniforge or Miniconda + R
 
 
 ## Installation (Local)
