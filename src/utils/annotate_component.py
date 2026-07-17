@@ -6,9 +6,6 @@ from src import config as project_config
 PROTON = 1.007276
 PPM_TOL = 5.0
 
-# ---------------------------------------------------------
-# 1. CONSTANTES ATOMIQUES DE BASE
-# ---------------------------------------------------------
 ATOM_MASSES = {
     'H':  1.0072765,  'Na': 22.9897693, 'K':  38.9637068,
     'N':  14.0030740, 'C':  12.0000000, 'O':  15.9949146,
@@ -23,9 +20,6 @@ M_MINUS_H_DELTA = {'H': -1}
 MNa_DELTA = {'Na': +1}
 MK_DELTA = {'K': +1}
 
-# ---------------------------------------------------------
-# 2. PARSEUR DYNAMIQUE DEPUIS LE CONFIG
-# ---------------------------------------------------------
 def build_reverse_encoding(mass_diffs, adduct_diffs, dimer_diffs):
     reverse = {}
     for i, name in enumerate(mass_diffs.keys()):
@@ -44,16 +38,15 @@ ALL_MASS_DIFFS = {
     **project_config.DIMER_DIFFS_NEGATIVE
 }
 
-# Génération dynamique des isotopes reconnus depuis l'Excel
 ISOTOPE_MASS_SHIFTS = {}
 for name, diff in project_config.ISOTOPE_DIFFS.items():
-    iso_name = name.split('_')[1]  # ex: extrait '13C' de 'isotope_13C'
+    iso_name = name.split('_')[1]  # Extract '13C' from 'isotope_13C'
     ISOTOPE_MASS_SHIFTS[iso_name] = diff
 
 HEAVY_ISOTOPES = set(ISOTOPE_MASS_SHIFTS.keys())
 
 def parse_formula(formula_str):
-    """Extrait les atomes et leurs comptes depuis une chaîne (ex: '2H', 'H2O', 'NH4')."""
+    """Parse formula string and return atom counts (e.g., 'H2O' -> {'H': 2, 'O': 1})."""
     counts = {}
     m = re.match(r'^([0-9]+)(.*)', formula_str)
     if m:
@@ -70,7 +63,7 @@ def parse_formula(formula_str):
     return counts
 
 def parse_edge_name(edge_name):
-    """Traduit un nom d'edge en delta d'atomes basiques."""
+    """Convert edge name to atom delta dict (e.g., 'adduct_Na-H' -> {'Na': 1, 'H': -1})."""
     if edge_name.startswith('isotope_'):
         return {edge_name.split('_')[1]: 1}
         
@@ -83,9 +76,7 @@ def parse_edge_name(edge_name):
     if chem_part.startswith('dimer_2M'):
         chem_part = chem_part[len('dimer_2M'):]
         if not chem_part:
-            return {} # Dimère pur sans modification
-            
-    # Ajoute un "+" implicite en début de chaîne si absent
+            return {}
     if chem_part and chem_part[0] not in ['+', '-']:
         chem_part = '+' + chem_part
         
@@ -100,7 +91,6 @@ def parse_edge_name(edge_name):
             
     return {k: v for k, v in delta.items() if v != 0}
 
-# Création des dictionnaires dynamiques
 ADDUCT_DELTAS = {}
 DIRECTION = {}
 EDGE_ATOM_DELTAS = {}
@@ -122,9 +112,6 @@ for name, diff in ALL_MASS_DIFFS.items():
 POSITIVE_EDGE_NAMES = set(project_config.MOD_DIFFS_POSITIVE) | set(project_config.DIMER_DIFFS_POSITIVE)
 NEGATIVE_EDGE_NAMES = set(project_config.MOD_DIFFS_NEGATIVE) | set(project_config.DIMER_DIFFS_NEGATIVE)
 
-# ---------------------------------------------------------
-# 3. FONCTIONS UTILITAIRES ET RESOLUTION DU MODE
-# ---------------------------------------------------------
 def _apply_delta(atoms, delta, sign=1):
     updated = dict(atoms)
     for atom, count in delta.items():
@@ -183,10 +170,7 @@ def apply_edge_delta(parent_atoms, edge_name, parent_is_lighter):
     return _apply_delta(parent_atoms, delta, +1 if parent_is_lighter else -1)
 
 def atoms_to_string(atoms, is_dimer=False, charge='+'):
-    """ 
-    Convertit un dictionnaire d'atomes en représentation string propre.
-    Exemple: {'C': 6, 'H': 12, 'O': 6} -> '[M+C6+H12+O6]+'
-    """
+    """Format atom dict to string: {'C': 6, 'H': 12, 'O': 6} -> '[M+C6+H12+O6]+'."""
     regular  = {k: v for k, v in atoms.items() if k not in HEAVY_ISOTOPES}
     isotopes = {k: v for k, v in atoms.items() if k in HEAVY_ISOTOPES}
 
@@ -218,7 +202,7 @@ def atoms_to_string(atoms, is_dimer=False, charge='+'):
     return result
 
 def get_raw_chem_string(ename, category):
-    """Extrait la formule brute d'une modification (ex: 'loss_H2O' -> 'H2O', 'dimer_2M+H' -> '2M+H')"""
+    """Extract formula from edge name (e.g., 'loss_H2O' -> 'H2O')."""
     part = ename
     if category == 'isotope':
         return part.replace('isotope_', '')
@@ -229,7 +213,7 @@ def get_raw_chem_string(ename, category):
     return part
 
 def format_chem_part(chem_str, is_gain):
-    """Ajoute le bon signe (+ ou -) ou inverse les signes existants (ex: +Na-H devient -Na+H)"""
+    """Add or flip sign based on direction (+Na-H -> -Na+H if loss)."""
     if is_gain:
         if not chem_str.startswith(('+', '-')):
             return '+' + chem_str
@@ -245,7 +229,7 @@ def format_chem_part(chem_str, is_gain):
         return flipped
 
 def build_annotation_string(base, mods, isos, charge):
-    """Assemble la chaîne finale avec simplification algébrique"""
+    """Build final annotation string with algebraic simplification."""
     simplified_mods = simplify_mods(mods)
     inner = base + simplified_mods
     result = f"[{inner}]{charge}"
@@ -254,7 +238,7 @@ def build_annotation_string(base, mods, isos, charge):
     return result
     
 def get_base_mod_str(base_delta):
-    """Déduit l'adduit racine (ex: +H ou -H)"""
+    """Extract base adduct string (+H, -H, etc)."""
     if base_delta == MH_DELTA: return '+H'
     if base_delta == M_MINUS_H_DELTA: return '-H'
     res = ''
@@ -264,22 +248,15 @@ def get_base_mod_str(base_delta):
     return res
 
 def simplify_mods(mods_list):
-    """
-    Combine et simplifie algébriquement les modifications chimiques.
-    Exemple: ['+H', '+Na-H'] -> '+Na'
-    """
+    """Algebraically combine mods: ['+H', '+Na-H'] -> '+Na'."""
     combined = "".join(mods_list)
     if not combined:
         return ""
         
-    # Extrait tous les termes signés (ex: '+H', '-H2O', '+2Na', '-Cl')
     terms = re.findall(r'([+-])([A-Za-z0-9]+)', combined)
-    
     counts = {}
     for sign, term in terms:
         multiplier = 1 if sign == '+' else -1
-        
-        # Sépare un éventuel chiffre initial de l'espèce (ex: '2H' -> 2 et 'H')
         m = re.match(r'^([0-9]*)([A-Za-z].*)$', term)
         if m:
             num_str, species = m.groups()
@@ -293,7 +270,6 @@ def simplify_mods(mods_list):
     pos_terms = []
     neg_terms = []
     
-    # Ordre d'affichage standard (métaux/protons d'abord, puis le reste alphabétiquement)
     def sort_key(s):
         if s == 'H': return 0
         if s == 'Na': return 1
@@ -306,8 +282,7 @@ def simplify_mods(mods_list):
     
     for species in sorted_species:
         count = counts[species]
-        if count == 0:
-            continue
+        if count == 0: continue
             
         abs_count = abs(count)
         prefix = str(abs_count) if abs_count > 1 else ""
@@ -319,27 +294,64 @@ def simplify_mods(mods_list):
             
     return "".join(pos_terms) + "".join(neg_terms)
 
+def atoms_to_mass_addition(atoms: dict) -> float:
+    total = 0.0
+    for atom, count in atoms.items():
+        if atom in HEAVY_ISOTOPES:
+            total += ISOTOPE_MASS_SHIFTS[atom] * count
+        else:
+            total += ATOM_MASSES.get(atom, 0.0) * count
+    return total
 
-# Propogate annotations for a given candidate
+
+def compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_threshold):
+    estimates = []
+    for gidx, (atoms, is_dimer, t_base, t_mods, t_isos, t_charge) in atom_deltas.items():
+        if is_dimer or t_charge in ["2+", "2-"]:
+            continue
+        prob = gidx_to_prob.get(gidx, 0.0)
+        if prob >= prob_threshold:
+            observed_mz = gidx_to_mz[gidx]
+            addition = atoms_to_mass_addition(atoms)
+            M_i = observed_mz - addition
+            estimates.append((gidx, M_i, prob))
+
+    if not estimates:
+        return None
+
+    M_vals  = np.array([e[1] for e in estimates])
+    weights = np.array([e[2] for e in estimates])
+    weights = weights / weights.sum()
+    neutral_mass = np.sum(weights * M_vals)
+    std          = np.sqrt(np.sum(weights * (M_vals - neutral_mass) ** 2))
+    return {'neutral_mass': neutral_mass, 'std': std, 'n_estimates': len(estimates)}
+
+# Propagate annotations for a given candidate
 def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                            gidx_to_mz, gidx_to_prob, prob_threshold=0.5,
-                           base_delta=MH_DELTA):
+                           base_delta=MH_DELTA, charge='+'):
+    
     adduct_edges  = [(s, d, n, c) for s, d, n, c in component_edges if c == 'adduct']
     dimer_edges   = [(s, d, n, c) for s, d, n, c in component_edges if c == 'dimer']
     isotope_edges = [(s, d, n, c) for s, d, n, c in component_edges if c == 'isotope']
 
     base_mod_str = get_base_mod_str(base_delta)
     
-    # Nouvel état : (atoms_dict, is_dimer, base_text, mods_list, isotopes_list)
+    # Establish known multicharged pairs dynamically based on polarity
+    if charge == '+':
+        known_multicharged_pairs = ["2M", "2M+H", "2M+Na", "2M+NH4"]
+    else:
+        known_multicharged_pairs = ["2M-H", "2M+H", "2M+HCOO", "2M+Cl"]
+    
     node_state = {
-        candidate_gidx: (dict(base_delta), False, 'M', [base_mod_str], [])
+        candidate_gidx: (dict(base_delta), False, 'M', [base_mod_str], [], charge)
     }
     queue   = [candidate_gidx]
     visited = {candidate_gidx}
 
     while queue:
         cur = queue.pop(0)
-        cur_atoms, cur_is_dimer, cur_base, cur_mods, cur_isos = node_state[cur]
+        cur_atoms, cur_is_dimer, cur_base, cur_mods, cur_isos, cur_charge = node_state[cur]
         cur_mz = gidx_to_mz[cur]
 
         for src, dst, ename, cat in (adduct_edges + dimer_edges):
@@ -349,16 +361,55 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
             
             other_mz          = gidx_to_mz[other]
             parent_is_lighter = cur_mz < other_mz
-            chem_part         = get_raw_chem_string(ename, cat)
+            
+            direction = DIRECTION.get(ename, 0)
+            is_multicharged_dimer = False
+            
+            chem_part = get_raw_chem_string(ename, cat)
+            
+            # MULTICHARGED HEURISTIC: Match known hallucinated chemical strings
+            if cat == 'dimer' and not parent_is_lighter:
+                if chem_part in known_multicharged_pairs:
+                    is_multicharged_dimer = True
+            
+            if not is_multicharged_dimer:
+                if direction == 1 and not parent_is_lighter:
+                    continue 
+                if direction == -1 and parent_is_lighter:
+                    continue
 
             if cat == 'dimer':
-                if cur_is_dimer or not parent_is_lighter: continue
+                if is_multicharged_dimer:
+                    custom_charge = "2+" if charge == "+" else "2-"
+                    custom_mods = list(cur_mods) + [base_mod_str] 
+                    
+                    # --- CHEMISTRY RULE ---
+                    # Reversing the algorithm's dimer math (mz_heavy = 2*(mz_light - base) + dimer_adduct)
+                    # to deduce the exact neutral loss that occurred on the z=2 node.
+                    if charge == "+":
+                        if chem_part == "2M+NH4":
+                            custom_mods.append("-NH3")
+                        elif chem_part == "2M+Na":
+                            custom_mods.append("-Na+H")
+                    elif charge == "-":
+                        if chem_part == "2M+HCOO":
+                            custom_mods.append("-HCOOH")
+                        elif chem_part == "2M+Cl":
+                            custom_mods.append("-HCl")
+                        elif chem_part == "2M+H":
+                            custom_mods.append("-2H") 
+                        
+                    node_state[other] = (dict(cur_atoms), cur_is_dimer, cur_base, custom_mods, list(cur_isos), custom_charge)
+                    visited.add(other)
+                    continue
+                    
+                if cur_is_dimer: continue
+                
                 neutral_atoms = _apply_delta(cur_atoms, base_delta, -1)
                 doubled_atoms = {a: c * 2 for a, c in neutral_atoms.items()}
                 dimer_edge_atoms = EDGE_ATOM_DELTAS.get(ename, {})
                 child_atoms = _apply_delta(doubled_atoms, dimer_edge_atoms)
                 
-                # On sépare la base textuelle (ex: 2M) du modificateur (ex: +Na-H)
                 m = re.match(r'^([0-9]+M)(.*)$', chem_part)
                 if m:
                     d_base, d_mod = m.groups()
@@ -366,7 +417,7 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                     d_base, d_mod = '2M', ''
                 
                 mod_list = [format_chem_part(d_mod, True)] if d_mod else []
-                node_state[other] = (child_atoms, True, d_base, mod_list, list(cur_isos))
+                node_state[other] = (child_atoms, True, d_base, mod_list, list(cur_isos), charge)
                 visited.add(other)
                 queue.append(other)
 
@@ -374,9 +425,8 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                 child_atoms = apply_edge_delta(cur_atoms, ename, parent_is_lighter)
                 if child_atoms is None: continue
                 
-                # Concaténation pure du texte (+H2O, -CO2, etc.)
                 mod_str = format_chem_part(chem_part, parent_is_lighter)
-                node_state[other] = (child_atoms, cur_is_dimer, cur_base, list(cur_mods) + [mod_str], list(cur_isos))
+                node_state[other] = (child_atoms, cur_is_dimer, cur_base, list(cur_mods) + [mod_str], list(cur_isos), charge)
                 visited.add(other)
                 queue.append(other)
 
@@ -385,7 +435,7 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
 
     while iso_queue:
         cur = iso_queue.pop(0)
-        cur_atoms, cur_is_dimer, cur_base, cur_mods, cur_isos = node_state[cur]
+        cur_atoms, cur_is_dimer, cur_base, cur_mods, cur_isos, cur_charge = node_state[cur]
         cur_mz = gidx_to_mz[cur]
 
         for src, dst, ename, cat in isotope_edges:
@@ -399,49 +449,17 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
             child_atoms = apply_edge_delta(cur_atoms, ename, parent_is_lighter=True)
             if child_atoms is None: continue
             
-            # Les isotopes vont dans un suffixe dédié
             chem_part = get_raw_chem_string(ename, cat)
-            node_state[other] = (child_atoms, cur_is_dimer, cur_base, list(cur_mods), list(cur_isos) + [chem_part])
+            node_state[other] = (child_atoms, cur_is_dimer, cur_base, list(cur_mods), list(cur_isos) + [chem_part], cur_charge)
             iso_visited.add(other)
             iso_queue.append(other)
 
     return node_state
 
-def atoms_to_mass_addition(atoms: dict) -> float:
-    total = 0.0
-    for atom, count in atoms.items():
-        if atom in HEAVY_ISOTOPES:
-            total += ISOTOPE_MASS_SHIFTS[atom] * count
-        else:
-            total += ATOM_MASSES.get(atom, 0.0) * count
-    return total
-
-def compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_threshold):
-    estimates = []
-    for gidx, (atoms, is_dimer, t_base, t_mods, t_isos) in atom_deltas.items():
-        if is_dimer:
-            continue
-        prob        = gidx_to_prob.get(gidx, 0.0)
-        observed_mz = gidx_to_mz[gidx]
-        addition    = atoms_to_mass_addition(atoms)
-        M_i         = observed_mz - addition
-        if prob > prob_threshold:
-            estimates.append((gidx, M_i, prob))
-
-    if not estimates:
-        return None
-
-    M_vals  = np.array([e[1] for e in estimates])
-    weights = np.array([e[2] for e in estimates])
-    weights = weights / weights.sum()
-    neutral_mass = np.sum(weights * M_vals)
-    std          = np.sqrt(np.sum(weights * (M_vals - neutral_mass) ** 2))
-    return {'neutral_mass': neutral_mass, 'std': std, 'n_estimates': len(estimates)}
 
 def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
                         node_probs, file_name, roi_values, reverse_encoding=None,
-                        prob_threshold=0.5, temperature=2.0, intensity_weight=0.3,
-                        base_delta=None, ionization_mode=None):
+                        prob_threshold=0.5, temperature=2.0, base_delta=None, ionization_mode=None):
     
     ionization_mode, reverse_encoding, base_delta, charge = _resolve_mode_settings(
         reverse_encoding=reverse_encoding,
@@ -458,18 +476,20 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
         for i in component_gidx_set
     }
 
+    valid_nodes = {i for i in component_gidx_set if gidx_to_prob[i] >= prob_threshold}
+    
     component_edges = []
     for ei in range(edge_index.shape[1]):
         src_roi  = edge_index[0, ei].item()
         dst_roi  = edge_index[1, ei].item()
         src_gidx = roi_to_gidx.get(src_roi)
         dst_gidx = roi_to_gidx.get(dst_roi)
-        if src_gidx not in component_gidx_set: continue
-        if dst_gidx not in component_gidx_set: continue
-        etype_int = int(edge_attr[ei, 1].item())
-        if etype_int not in reverse_encoding:  continue
-        etype_name, category = reverse_encoding[etype_int]
-        component_edges.append((src_gidx, dst_gidx, etype_name, category))
+        
+        if src_gidx in valid_nodes and dst_gidx in valid_nodes:
+            etype_int = int(edge_attr[ei, 1].item())
+            if etype_int in reverse_encoding:
+                etype_name, category = reverse_encoding[etype_int]
+                component_edges.append((src_gidx, dst_gidx, etype_name, category))
 
     isotope_child_set = set()
     for src_gidx, dst_gidx, etype_name, category in component_edges:
@@ -477,10 +497,26 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
             heavier = src_gidx if gidx_to_mz[src_gidx] > gidx_to_mz[dst_gidx] else dst_gidx
             isotope_child_set.add(heavier)
 
+    if ionization_mode == 'positive':
+        known_multicharged_pairs = ["2M", "2M+H", "2M+Na", "2M+NH4"]
+    else:
+        known_multicharged_pairs = ["2M-H", "2M+H", "2M+HCOO", "2M+Cl"]
+
     dimer_gidx_set = set()
     for src_gidx, dst_gidx, etype_name, category in component_edges:
         if category == 'dimer':
-            heavier = src_gidx if gidx_to_mz[src_gidx] > gidx_to_mz[dst_gidx] else dst_gidx
+            lighter = src_gidx if gidx_to_mz[src_gidx] < gidx_to_mz[dst_gidx] else dst_gidx
+            heavier = dst_gidx if lighter == src_gidx else src_gidx
+            
+            chem_part = get_raw_chem_string(etype_name, category)
+            
+            # BYPASS 1: Known multicharged illusions
+            if chem_part in known_multicharged_pairs:
+                continue 
+                
+            # BYPASS 2: Allow true dimers to be candidate roots
+            continue 
+            
             dimer_gidx_set.add(heavier)
 
     dimer_and_children = set(dimer_gidx_set)
@@ -492,15 +528,16 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
                 dimer_and_children.add(heavier)
 
     excluded = isotope_child_set | dimer_and_children
+    candidates = [i for i in valid_nodes if i not in excluded]
 
-    candidates = [
-        i for i in component_gidx_set
-        if gidx_to_prob[i] >= prob_threshold and i not in excluded
-    ]
     if not candidates:
-        candidates = [i for i in component_gidx_set if gidx_to_prob[i] >= prob_threshold]
+        candidates = list(valid_nodes)
     if not candidates:
         return []
+
+    raw_ints = [gidx_to_int[i] for i in candidates]
+    max_int = max(raw_ints) if raw_ints and max(raw_ints) > 0 else 1.0
+    max_prob = max([gidx_to_prob[i] for i in candidates]) if candidates else 1.0
 
     results = []
 
@@ -513,9 +550,8 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
         for src_gidx, dst_gidx, etype_name, category in component_edges:
             if src_gidx != candidate_gidx and dst_gidx != candidate_gidx:
                 continue
+            
             other_gidx = dst_gidx if src_gidx == candidate_gidx else src_gidx
-            if gidx_to_prob.get(other_gidx, 0.0) < prob_threshold:
-                continue
 
             delta     = ADDUCT_DELTAS.get(etype_name)
             if delta is None: continue
@@ -528,7 +564,10 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
                 if other_mz > candidate_mz and _ppm_ok(other_mz, candidate_mz + delta):
                     is_child = True
             elif category == 'dimer':
+                chem_part = get_raw_chem_string(etype_name, category)
                 if other_mz > candidate_mz and _ppm_ok(other_mz, 2.0 * implied_M + delta):
+                    is_child = True
+                elif other_mz < candidate_mz and chem_part in known_multicharged_pairs:
                     is_child = True
             elif category == 'adduct':
                 if direction == +1:
@@ -549,35 +588,22 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
 
         n_children         = len(children)
         n_isotope_children = sum(1 for n in children.values() if n.startswith('isotope'))
-        log10_intensity    = np.log10(max(candidate_int, 1.0))
-
-        score = (
-            n_children        * 5.0
-            + n_isotope_children * 2.0
-            + np.log(gidx_to_prob[candidate_gidx] + 1e-9)
-            + log10_intensity * intensity_weight
-        )
+        
+        norm_intensity = candidate_int / max_int
+        norm_prob = gidx_to_prob[candidate_gidx] / max_prob
 
         atom_deltas = propagate_annotations(
             candidate_gidx, component_gidx_set, component_edges,
             gidx_to_mz, gidx_to_prob, prob_threshold,
-            base_delta=base_delta
+            base_delta=base_delta, charge=charge
         )
 
         mass_regression = compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_threshold)
 
         node_annotations = {}
-        for gidx, (atoms, is_dimer, t_base, t_mods, t_isos) in atom_deltas.items():
-            annotation = build_annotation_string(t_base, t_mods, t_isos, charge)
-            
-            if gidx_to_prob.get(gidx, 0.0) < prob_threshold:
-                annotation += '*'
+        for gidx, (atoms, is_dimer, t_base, t_mods, t_isos, t_charge) in atom_deltas.items():
+            annotation = build_annotation_string(t_base, t_mods, t_isos, t_charge)
             node_annotations[gidx_to_roi[gidx]] = annotation
-            
-        for i in component_gidx_set:
-            roi = gidx_to_roi[i]
-            if roi not in node_annotations:
-                node_annotations[roi] = 'unknown'
 
         if n_children >= 2 and n_isotope_children >= 1:
             confidence = 'high'
@@ -591,12 +617,23 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
             'candidate_gidx':       candidate_gidx,
             'implied_neutral_mass': round(implied_M, 6),
             'mass_regression':      mass_regression,
-            'score':                score,
             'node_annotations':     node_annotations,
             'n_children':           n_children,
             'n_isotope_children':   n_isotope_children,
+            'norm_intensity':       round(float(norm_intensity), 4),
+            'norm_prob':            round(float(norm_prob), 4),
             'confidence':           confidence,
         })
+
+    # Normalized Scoring
+    if results:
+        max_n_c = max(r['n_children'] for r in results) or 1
+        max_n_iso = max(r['n_isotope_children'] for r in results) or 1
+        for r in results:
+            r['score'] = (r['n_children'] / max_n_c * 1.0 + 
+                          r['n_isotope_children'] / max_n_iso * 0.5 +
+                          r['norm_intensity'] * 2.0 + 
+                          r['norm_prob'] * 0.5)
 
     results.sort(key=lambda x: -x['score'])
 
@@ -611,7 +648,6 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
         results[0]['annotation_prob'] = 1.0
 
     return results
-
 if __name__ == "__main__":
     print("Mods, adducts, and dimers loaded from config:")
     print("Isotopes:", list(project_config.ISOTOPE_DIFFS.keys()))

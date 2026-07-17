@@ -125,11 +125,14 @@ python scripts/build_graphs.py --input_dir  data/test/ionshed_output --output_di
 ```
 
 **3. Model Inference (Python)**
-Run the trained GNN model to evaluate probabilities and output the final annotated `.tsv` tables. If you are running files in negative mode, replace `model_positive.pth` with `model_negative.pth` in the command below.
+Pass the constructed graphs through the trained MassGAT model. This step evaluates probabilities, groups peaks into chemical components, and optionally annotates them.
+The `--with_top_annotations` flag can be used to obtain the top 5 annotations for each component suggested by the annotation heuristic. By default, only peaks with a probability above 0.5 are kept, but you can adjust this threshold using the `--min_node_prob` argument.
 
 ```bash
-python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results
+python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
 ```
+
+
 
 ## Training
 
