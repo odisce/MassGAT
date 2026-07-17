@@ -3,6 +3,53 @@ library(ionshed)
 library(arrow)
 library(xcms)
 library(MSnbase)
+library(yaml)
+
+# Works whether the script is run via `Rscript file.R` or `source(file.R)`
+get_script_path <- function() {
+    cmd_args <- commandArgs(trailingOnly = FALSE)
+    file_flag <- "--file="
+    match <- grep(file_flag, cmd_args)
+    if (length(match) > 0) {
+        return(normalizePath(sub(file_flag, "", cmd_args[match[1]])))
+    }
+    if (!is.null(sys.frame(1)$ofile)) {
+        return(normalizePath(sys.frame(1)$ofile))
+    }
+    stop("Could not determine script path; pass config_path explicitly to load_config().")
+}
+
+# Load configuration from YAML
+load_config <- function(config_path = NULL) {
+    if (is.null(config_path)) {
+        # Try to find config.yaml relative to this script (project_root/config.yaml,
+        # assuming script lives at project_root/scripts/)
+        script_dir <- dirname(dirname(get_script_path()))
+        config_path <- file.path(script_dir, 'config.yaml')
+    }
+    
+    if (!file.exists(config_path)) {
+        stop("Configuration file not found: ", config_path)
+    }
+    
+    config <- yaml::read_yaml(config_path)
+    return(config)
+}
+
+# Load configuration
+config <- load_config()
+RTTOL <- config$peak_picking$rttol
+PPM <- config$peak_picking$ppm
+MZ_RES <- config$peak_picking$mz_res
+RT_RES <- config$peak_picking$rt_res
+XIC_RTTOL <- config$peak_picking$xic_rttol
+
+cat("Loaded configuration:\n")
+cat("  RTTOL:", RTTOL, "\n")
+cat("  PPM:", PPM, "\n")
+cat("  MZ_RES:", MZ_RES, "\n")
+cat("  RT_RES:", RT_RES, "\n")
+cat("  XIC_RTTOL:", XIC_RTTOL, "\n")
 
 
 # Function to process a single mzML/mzXML file
@@ -36,7 +83,7 @@ process_file <- function(file_path, output_folder) {
         
         # Compute the peak list and the signals
         cat("Computing peak list...\n")
-        res <- SpMat_DescendingPeakPicking(MSnExpObj, rttol = 5, ppm = 3, mz_res = 0.0001, rt_res = 0.1)
+        res <- SpMat_DescendingPeakPicking(MSnExpObj, rttol = RTTOL, ppm = PPM, mz_res = MZ_RES, rt_res = RT_RES)
         cat("Peak list computed\n")
 
         if (!is.null(res$peak_info)) {
@@ -46,10 +93,8 @@ process_file <- function(file_path, output_folder) {
             cat(paste("nrow(res$roi_data):", nrow(res$roi_data)), "\n")
         }
         # Extract the XICs
-        cat("Debug: About to call extract_XICs...\n")
-        rttol <- 10
         roi_res <- tryCatch({
-            extract_XICs(roi_ls = res, rttol = rttol)
+            extract_XICs(roi_ls = res, rttol = XIC_RTTOL)
         }, error = function(e) {
             cat("Error in extract_XICs:", e$message, "\n")
             return(NULL)
@@ -143,11 +188,11 @@ process_all_files <- function(input_folder, output_folder) {
         
         # Print progress
         if (result$status == "success") {
-            cat("✓ SUCCESS\n")
+            cat("SUCCESS\n")
         } else if (result$status == "skipped") {
-            cat("⊘ SKIPPED\n")
+            cat("SKIPPED\n")
         } else {
-            cat("✗ ERROR\n")
+            cat("ERROR\n")
         }
     }
     
@@ -204,15 +249,21 @@ process_all_files <- function(input_folder, output_folder) {
 
 # Main execution
 main <- function() {
-    # Check if running in container environment
+    # 1. Capture command-line arguments
+    args <- commandArgs(trailingOnly = TRUE)
+    
+    # 2. Check if running in container environment or via CLI args
     if (file.exists("/workspace") && file.exists("/data")) {
         cat("Running in Singularity container environment\n")
         input_folder <- "/data"
         output_folder <- "/output"
+    } else if (length(args) >= 2) {
+        input_folder <- args[1]
+        output_folder <- args[2]
     } else {
-        # Use specified paths
-        input_folder <- "/spi/scidospi/01_Applications/CHODEX/mzml"
-        output_folder <- "/spi/scidospi/08_Team/PinartPaulHenri/processed_with_ionshed"
+        cat("ERROR: Missing arguments.\n")
+        cat("Usage: Rscript ionshed_batch_processing.R <input_folder> <output_folder>\n")
+        quit(status = 1)
     }
     
     # Create output folder if it doesn't exist
@@ -223,6 +274,8 @@ main <- function() {
     # Set up logging in output folder
     log_file <- file.path(output_folder, paste0("ionshed_processing_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
     sink(log_file, split = TRUE)
+    
+    exit_code <- 0
     
     tryCatch({
         # Process all files
@@ -235,10 +288,19 @@ main <- function() {
             exit_code <- 1
         } else {
             cat("All files processed successfully!\n")
-            exit_code <- 0
         }
+        
+    }, error = function(e) {
+        # Catch fatal errors, turn off sink, and print to terminal
+        sink() 
+        cat("\n[FATAL ERROR]:", conditionMessage(e), "\n")
+        cat("Check your file paths and ensure .mzML files exist in the input directory.\n")
+        quit(status = 1)
+        
     }, finally = {
-        sink()
+        if (sink.number() > 0) {
+            sink()
+        }
         cat("Log saved to:", log_file, "\n")
     })
     

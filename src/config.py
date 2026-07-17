@@ -1,29 +1,54 @@
 """
 Configuration file for MassGAT project.
-Contains hyperparameters and constants for graph construction, model architecture, and training.
+Loads hyperparameters from config.yaml and constants for graph construction, model architecture, and training.
 """
 
 import torch
+import yaml
+from pathlib import Path
+
+# Load configuration from YAML
+def _load_config_yaml():
+    config_path = Path(__file__).parent.parent / 'config.yaml'
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+_CONFIG = _load_config_yaml()
 
 # Graph Construction parameters
-RT_WINDOW = 5.0  # Retention time window in seconds for finding neighbors
-MZ_TOLERANCE = 0.001  # m/z tolerance in Da for mass difference edges
-EIC_LEN = 32  # Fixed length for EIC vectors after interpolation
-MIN_SIGNALS = 8
+RT_WINDOW = _CONFIG['graph']['rt_window']
+MZ_TOLERANCE = _CONFIG['graph']['mz_tolerance']
+EIC_LEN = _CONFIG['graph']['eic_len']
+MIN_SIGNALS = _CONFIG['graph']['min_signals']
+
+# Peak Picking parameters
+RTTOL = _CONFIG['peak_picking']['rttol']
+PPM = _CONFIG['peak_picking']['ppm']
+MZ_RES = _CONFIG['peak_picking']['mz_res']
+RT_RES = _CONFIG['peak_picking']['rt_res']
+XIC_RTTOL = _CONFIG['peak_picking']['xic_rttol']
 
 # Hierarchical correlation thresholds
-ISOTOPE_CORR_THRESHOLD = 0.6
-ADDUCT_CORR_THRESHOLD = 0.85
-DIMER_CORR_THRESHOLD = 0.85
+ISOTOPE_CORR_THRESHOLD = _CONFIG['thresholds']['isotope_corr']
+ADDUCT_CORR_THRESHOLD = _CONFIG['thresholds']['adduct_corr']
+DIMER_CORR_THRESHOLD = _CONFIG['thresholds']['dimer_corr']
+ISOTOPE_37CL_MIN_RATIO = _CONFIG['thresholds']['isotope_37cl_ratio']
 
-# Extra isotope validation constraints
-ISOTOPE_37CL_MIN_RATIO = 0.2  # Keep 37Cl only if I_isotope / I_parent >= this value
+# Model inference parameters
+BATCH_SIZE_INFERENCE = _CONFIG['model']['batch_size_inference']
 
 # Random seed for reproducibility
-RANDOM_SEED = 42
+RANDOM_SEED = _CONFIG['system']['random_seed']
 
 # Device configuration
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+_device_config = _CONFIG['system']['device']
+if _device_config == 'auto':
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+else:
+    DEVICE = _device_config
+
 
 # Feature vector indices (Node feature organization)
 # Feature vector layout: [mz, rt, log_into, rtmin, rtmax, log_imax, mz_float, sc_len, ...seqs...]
@@ -45,9 +70,6 @@ MASS_JITTER_SCALE = 5e-6      # Scale for mass jitter augmentation
 PROFILE_NOISE_STD = 0.1       # Std for profile Gaussian noise
 FEATURE_MASK_PROB = 0.05      # Probability of feature masking (5% of nodes)
 SPIKE_PROB = 0.1              # Probability of spike noise
-
-# Model inference parameters
-BATCH_SIZE_INFERENCE = 64     # Batch size for inference/prediction
 
 
 # Common mass differences for isotopes (same for both modes)

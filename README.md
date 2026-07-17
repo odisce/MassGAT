@@ -72,6 +72,14 @@ Rscript src/massgat/r_scripts/install_packages.R
 ```
 
 
+## Configuration
+MassGAT allows you to tune the analytical pipeline without modifying the source code via the config.yaml file located in the root directory. Key sections include:
+
+1. Peak Picking (peak_picking): Configure standard LC-MS parameters (ppm, rttol) passed directly to the IonShed segmentation algorithm.
+2. Graph (graph): Adjust rt_window and mz_tolerance to define how nodes are linked geographically in the dataset.
+3. Thresholds (thresholds): Tune correlation thresholds (isotope_corr, adduct_corr) to make chemical edge assignments more or less strict. Lowering these will yield denser graphs.
+
+
 ## Usage
 
 ### Interactive Tutorial
@@ -85,6 +93,52 @@ We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT
 3. Open the `massgat.ipynb` notebook, select the `massgat_env` kernel, and follow the instructions in each cell to run the pipeline.
 
 4. The results will be saved in the `results` subfolder of your project directory, and you can explore the output tables and visualizations directly in the notebook.
+
+
+### Command Line Interface
+
+For batch processing or execution on remote servers, you can run the pipeline sequentially from the terminal.
+
+
+**Data Preparation**
+First, set up your input directory. Create a folder named `data/mzml` in the root of your repository and place your raw `.mzML` or `.mzXML` files inside it. Your structure should look like this:
+```text
+MassGAT/
+└── data/
+    └── project_name/
+        └── mzml/
+            ├── sample_01.mzML
+            └── sample_02.mzML
+```
+
+**1. Trace Segmentation (R)**
+Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format. If you create a new project folder, replace `test` with your project folder path in the command below.
+```bash
+Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
+```
+
+
+**2. Graph Construction (Python)**
+Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
+```bash
+python scripts/build_graphs.py --input_dir  data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive
+```
+
+**3. Model Inference (Python)**
+Run the trained GNN model to evaluate probabilities and output the final annotated `.tsv` tables. If you are running files in negative mode, replace `model_positive.pth` with `model_negative.pth` in the command below.
+
+```bash
+python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results
+```
+
+## Training
+
+To train MassGAT on a custom or synthetic dataset, use the `train.py` script. The script uses command-line arguments to configure hyperparameters and relies on MLflow to track experiments and metrics.
+
+```bash
+python scripts/train.py --use_synthetic --synthetic_path data/synthetic_dataset
+```
+
 
 
 ## Citation
