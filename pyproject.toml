@@ -7,8 +7,16 @@ name = "massgat"
 version = "0.1.0"
 description = "MassGAT: a graph-based collective learning approach for untargeted detection and annotation of LC-MS data"
 readme = "README.md"
-requires-python = ">=3.8,<3.11"
-license = {text = "MIT"}
+authors = [
+  { name = "Paul-Henri Pinart", email = "Paul-Henri.PINART@cea.fr" },
+  { name = "Sylvain Dechaumet", email = "sylvain.dechaumet@cea.fr" },
+  { name = "Etienne Thevenot", email = "Etienne.THEVENOT@cea.fr" }
+]
+maintainers = [
+  { name = "Paul-Henri Pinart", email = "Paul-Henri.PINART@cea.fr" }
+]
+requires-python = ">=3.8"
+license = {text = "CeCILL"}
 keywords = ["machine-learning", "graph-neural-networks", "lc-ms", "metabolomics"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -19,12 +27,16 @@ classifiers = [
 
 dependencies = [
     "pandas>=1.5.0",
-    "numpy>=1.22.0,<2.0.0", 
+    "numpy>=1.22.0", 
     "scipy>=1.8.0",
     "scikit-learn>=1.0.0",
     "matplotlib>=3.5.0",
     "seaborn>=0.12.0",
-    "torch>=2.0.0,<2.2.0", 
+    "torch>=2.0.0", 
+    "torchvision",
+    #"torch-scatter",
+    #"torch-sparse",
+    # "torch-cluster",
     "torch-geometric>=2.3.0",
     "pyyaml",
     "tqdm",
@@ -69,3 +81,47 @@ python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[tool.pixi.workspace]
+channels = ["conda-forge", "r"]
+platforms = [
+  "win-64",
+  "linux-64",
+  { name = "win-64-cuda", platform = "win-64", cuda = "12.6" },
+  { name = "linux-64-cuda", platform = "linux-64", cuda = "12.6" }
+]
+
+[tool.pixi.feature.gpu]
+platforms = ["linux-64-cuda", "win-64-cuda"]
+
+[tool.pixi.feature.gpu.dependencies]
+cuda-version = "12.*"
+pytorch-gpu = ">=2.0.0"
+
+[tool.pixi.feature.cpu]
+platforms = ["linux-64", "win-64"]
+
+[tool.pixi.feature.cpu.dependencies]
+pytorch-cpu = ">=2.0.0"
+
+[tool.pixi.pypi-dependencies]
+massgat = { path = ".", editable = true }
+
+[tool.pixi.dependencies]
+compilers = "*"
+cmake = "*"
+make = "*"
+r-base = ">=4.5.0"
+r-arrow = "*"
+
+[tool.pixi.environments]
+default = { features = ["cpu"] }
+gpu = { features = ["gpu"] }
+cpu = { features = ["cpu"] }
+
+[tool.pixi.tasks]
+test-gpu = "python -c 'import torch; print(torch.cuda.is_available())'"
+install-ionshed = "Rscript environment/install_package.R"
+
+[package.build] 
+backend = { name = "pixi-build-r", version = "0.*" }

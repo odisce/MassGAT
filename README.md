@@ -4,87 +4,67 @@
 
 ![MassGAT Pipeline ](docs/massgat_overview_horizontal.png)
 
-
 ## Table of Contents
-- [Requirements](#requirements)
-- [Installation](#installation)
-  - [Option A: HPC / Slurm (Recommended)](#option-a-hpc--slurm-recommended)
-  - [Option B: Local Workstation](#option-b-local-workstation-linuxmacoswindows)
-- [Usage](#usage)
-  - [Interactive Tutorial](#interactive-tutorial)
-  - [Command Line Interface (CLI)](#command-line-interface-cli)
-- [Repository Structure](#repository-structure)
-- [Citation](#citation)
+
+- [MassGAT](#massgat)
+  - [Table of Contents](#table-of-contents)
+  - [Requirements](#requirements)
+  - [Installation (Local)](#installation-local)
+    - [Option A: Singularity / Docker](#option-a-singularity--docker)
+    - [Option B : Local (Linux/MacOS/Windows)](#option-b--local-linuxmacoswindows)
+      - [Prerequisites](#prerequisites)
+      - [Set-up the environment](#set-up-the-environment)
+  - [Configuration](#configuration)
+  - [Usage](#usage)
+    - [Interactive Tutorial](#interactive-tutorial)
+    - [Command Line Interface](#command-line-interface)
+  - [Training](#training)
+  - [Citation](#citation)
 
 ## Requirements
 
-* **Servers:** Singularity or Apptainer.
-* **Local :** Miniforge or Miniconda + R
+Installing **MassGAT** can be done from a local environment or directly inside containers:
+- **Local:** [Pixi >= 0.73](https://pixi.prefix.dev/latest/) and on Windows: [Rtools](https://cran.r-project.org/bin/windows/Rtools/).
+- **Containers:** [Docker](https://docs.docker.com/) (Windows, Ubuntu) or [Apptainer](https://apptainer.org/) (Ubuntu).
 
+## Installation
 
-## Installation (Local)
+First, clone this repository (eg.: using [git](https://git-scm.com/)):
 
-First, clone the repository:
 ```bash
 git clone https://github.com/odisce/MassGAT.git
 cd MassGAT
 ```
 
+### Local (Linux/MacOS/Windows)
 
-### Option A: Singularity / Docker
+#### Set-up the environment
 
-A faire quand on aura l'image sur dockerhub
+| with Pixi   |  |
+| :-------- | :--------- |
+| to use cpu | `pixi shell -e cpu` |
+| to use gpu | `pixi shell -e gpu` |
 
 
-### Option B : Local (Linux/MacOS/Windows)
-
-Open the Miniforge/Miniconda terminal to run the setup. If you wish to use a standard terminal on Windows, run :
-
+#### Install R dependencies :
 ```bash
-conda init cmd.exe
+pixi run install-ionshed
 ```
-
-in the Miniforge/Miniconda terminal, then restart the terminal.
-
-
-1. Create the environment and activate it:
-```bash
-conda create --name massgat_env python=3.10 --channel conda-forge --override-channels -y
-conda activate massgat_env
-```
-
-2. Intsall PyTorch & PyTorch Geometric
-
-For CPU-only, replace cu118 with cpu in the following commands:
-```bash
-pip install torch==2.1.0 torchvision --index-url [https://download.pytorch.org/whl/cu118](https://download.pytorch.org/whl/cu118)
-pip install torch-scatter torch-sparse torch-cluster -f [https://data.pyg.org/whl/torch-2.1.0+cu118.html](https://data.pyg.org/whl/torch-2.1.0+cu118.html)
-```
-
-3. Install MassGAT and its dependencies:
-```bash
-pip install -e .
-```
-
-4. Install R Dependencies (IonShed & XCMS) :
-```bash
-Rscript src/massgat/r_scripts/install_packages.R
-```
-
 
 ## Configuration
+
 MassGAT allows you to tune the analytical pipeline without modifying the source code via the config.yaml file located in the root directory. Key sections include:
 
-1. Peak Picking (peak_picking): Configure standard LC-MS parameters (ppm, rttol) passed directly to the IonShed segmentation algorithm.
-2. Graph (graph): Adjust rt_window and mz_tolerance to define how nodes are linked geographically in the dataset.
-3. Thresholds (thresholds): Tune correlation thresholds (isotope_corr, adduct_corr) to make chemical edge assignments more or less strict. Lowering these will yield denser graphs.
+1. **Peak Picking (peak_picking):** Configure standard LC-MS parameters (ppm, rttol) passed directly to the [ionshed](https://github.com/odisce/ionshed) segmentation algorithm.
+2. **Graph (graph):** Adjust rt_window and mz_tolerance to define how nodes are linked geographically in the dataset.
+3. **Thresholds (thresholds):** Tune correlation thresholds (isotope_corr, adduct_corr) to make chemical edge assignments more or less strict. Lowering these will yield denser graphs.
 
 
 ## Usage
 
 ### Interactive Tutorial
 
-We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT pipeline (Ionshed segmentation, graph construction, inference, and component vizualization) on a test file.
+We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT pipeline ([ionshed](https://github.com/odisce/ionshed) segmentation, graph construction, inference, and component vizualization) on a test file.
 
 1. Create a directory in the `data` folder with your project name, create a `mzml` subdirectory, and place your .mzML (or .mzXML) files inside it. For testing, you can also use the provided test file in the `data/test` folder.
 
@@ -99,24 +79,27 @@ We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT
 
 For batch processing or execution on remote servers, you can run the pipeline sequentially from the terminal.
 
-
 **Data Preparation**
-First, set up your input directory. Create a folder named `data/mzml` in the root of your repository and place your raw `.mzML` or `.mzXML` files inside it. Your structure should look like this:
+A small example is provided in a project called `test` and can be run directly but if to use other files:
+- Replace `test` by your project name in all the following commands
+- First, set up your input directory by creating a folder named `data/test/mzml` in the root of your repository.
+- Place your LC-MS `.mzML` or `.mzXML` files (centroid mode) inside.
+
+The structure looks like this:
 ```text
 MassGAT/
 └── data/
-    └── project_name/
+    └── test/
         └── mzml/
             ├── sample_01.mzML
             └── sample_02.mzML
 ```
 
 **1. Trace Segmentation (R)**
-Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format. If you create a new project folder, replace `test` with your project folder path in the command below.
+Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format.
 ```bash
 Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
 ```
-
 
 **2. Graph Construction (Python)**
 Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
