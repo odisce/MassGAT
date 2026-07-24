@@ -33,7 +33,7 @@ RUN mkdir -p /library/R && chmod 777 /library/R \
     && echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"), download.file.method = "libcurl", HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /usr/lib/R/etc/Rprofile.site \
     && R -e ".libPaths('/library/R'); pkgs <- c('remotes', 'arrow', 'BiocManager', 'fs', 'htmlwidgets', 'plotly', 'igraph'); install.packages(pkgs); if (any(!(pkgs %in% installed.packages()[,'Package']))) stop('ERREUR CRAN');" \
     && R -e ".libPaths('/library/R'); bioc_pkgs <- c('mzR', 'MSnbase', 'QFeatures', 'MsExperiment', 'xcms'); BiocManager::install(bioc_pkgs, ask = FALSE, update = TRUE); if (any(!(bioc_pkgs %in% installed.packages()[,'Package']))) stop('ERREUR Bioconductor');" \
-    && git clone http://132.166.53.123:8081/tools/r-packages/ionshed.git /opt/repo \
+    && git clone https://github.com/odisce/ionshed.git /opt/repo \
     && R -e ".libPaths('/library/R'); remotes::install_local('/opt/repo', dependencies = TRUE, upgrade = 'never', force = TRUE)"
 
 CMD ["/bin/bash"]

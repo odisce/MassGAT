@@ -78,8 +78,11 @@ from openpyxl import load_workbook
 
 def _empty_cfg():
     return {
-        'ISOTOPE_DIFFS': {},'MOD_DIFFS_POSITIVE': {}, 'MOD_DIFFS_NEGATIVE': {},
+        'ISOTOPE_DIFFS': {}, 'ISOTOPE_FREQUENCIES': {},
+        'MOD_DIFFS_POSITIVE': {}, 'MOD_DIFFS_NEGATIVE': {},
+        'MOD_FREQUENCIES_POSITIVE': {}, 'MOD_FREQUENCIES_NEGATIVE': {},
         'DIMER_DIFFS_POSITIVE': {}, 'DIMER_DIFFS_NEGATIVE': {},
+        'DIMER_FREQUENCIES_POSITIVE': {}, 'DIMER_FREQUENCIES_NEGATIVE': {},
         'MOD_COMPATIBILITY_POSITIVE': {}, 'MOD_COMPATIBILITY_NEGATIVE': {},
         'ADDUCT_LOSSES': set(),
     }
@@ -107,6 +110,8 @@ def load_config(excel_path=None):
             if name:
                 if diff is not None:
                     cfg['ISOTOPE_DIFFS'][_clean(name)] = float(diff)
+                if freq is not None:
+                    cfg['ISOTOPE_FREQUENCIES'][_clean(name)] = float(freq)
 
     
     # Mods, dimers, compatibility for both modes
@@ -120,6 +125,8 @@ def load_config(excel_path=None):
                     name = _clean(name)
                     if diff is not None:
                         cfg[f'MOD_DIFFS_{mode.upper()}'][name] = float(diff)
+                    if freq is not None:
+                        cfg[f'MOD_FREQUENCIES_{mode.upper()}'][name] = float(freq)
                     if is_loss and str(is_loss).lower() in ('1', 'true', 'yes', 'x'):
                         cfg['ADDUCT_LOSSES'].add(name)
         
@@ -132,6 +139,8 @@ def load_config(excel_path=None):
                     name = _clean(name)
                     if diff is not None:
                         cfg[f'DIMER_DIFFS_{mode.upper()}'][name] = float(diff)
+                    if freq is not None:
+                        cfg[f'DIMER_FREQUENCIES_{mode.upper()}'][name] = float(freq)
         
         # Compatibility
         sheet = f'compat_{mode}'
@@ -152,38 +161,27 @@ def load_config(excel_path=None):
 
 _TABLE_CFG = load_config()
 ISOTOPE_DIFFS = _TABLE_CFG['ISOTOPE_DIFFS']
+ISOTOPE_FREQUENCIES = _TABLE_CFG['ISOTOPE_FREQUENCIES']
 MOD_DIFFS_POSITIVE = _TABLE_CFG['MOD_DIFFS_POSITIVE']
 MOD_DIFFS_NEGATIVE = _TABLE_CFG['MOD_DIFFS_NEGATIVE']
+MOD_FREQUENCIES_POSITIVE = _TABLE_CFG['MOD_FREQUENCIES_POSITIVE']
+MOD_FREQUENCIES_NEGATIVE = _TABLE_CFG['MOD_FREQUENCIES_NEGATIVE']
 DIMER_DIFFS_POSITIVE = _TABLE_CFG['DIMER_DIFFS_POSITIVE']
 DIMER_DIFFS_NEGATIVE = _TABLE_CFG['DIMER_DIFFS_NEGATIVE']
+DIMER_FREQUENCIES_POSITIVE = _TABLE_CFG['DIMER_FREQUENCIES_POSITIVE']
+DIMER_FREQUENCIES_NEGATIVE = _TABLE_CFG['DIMER_FREQUENCIES_NEGATIVE']
+MOD_COMPATIBILITY_POSITIVE = _TABLE_CFG['MOD_COMPATIBILITY_POSITIVE']
+MOD_COMPATIBILITY_NEGATIVE = _TABLE_CFG['MOD_COMPATIBILITY_NEGATIVE']
 ADDUCT_LOSSES = _TABLE_CFG['ADDUCT_LOSSES']
 
+# Dynamic variables initialized based on mode detection
+MASS_DIFFS = ISOTOPE_DIFFS.copy()
+ADDUCT_DIFFS = {}  # Will be set by configure_for_mode()
+DIMER_DIFFS = {}   # Will be set by configure_for_mode()
+ADDUCT_FREQUENCIES = {}  # Will be set by configure_for_mode()
+DIMER_FREQUENCIES = {}  # Will be set by configure_for_mode()
+ADDUCT_COMPATIBILITY = {}  # Will be set by configure_for_mode()
 
-def detect_ionization_mode(peaks_df, file_id=None):
-    """
-    Détecte le mode d'ionisation (positif/négatif) à partir des données.
-    
-    Args:
-        peaks_df: DataFrame des pics
-        file_id: ID du fichier pour le logging
-        
-    Returns:
-        str: 'positive' ou 'negative'
-    """
-    peaks_df = peaks_df[peaks_df["file_id"] == file_id].copy()
-    # Méthode 1: Vérifier s'il y a une colonne 'file_polarity'
-    if 'file_polarity' in peaks_df.columns:
-        polarity = peaks_df['file_polarity'].iloc[0]
-        mode = 'positive' if polarity == 1 else 'negative'
-        if file_id:
-            print(f"Mode détecté via file_polarity pour file_id_{file_id}: {mode}")
-        return mode
-    else:
-        print(f"Found columns {peaks_df.columns}")
-    
-    if file_id:
-        print(f"ATTENTION: Mode non détectable pour file_id_{file_id}, utilise mode positif par défaut")
-    return 'positive'  # Défaut si détection impossible
 
 def configure_for_mode(mode):
     """
@@ -194,21 +192,27 @@ def configure_for_mode(mode):
     """
     global MASS_DIFFS, ADDUCT_DIFFS, DIMER_DIFFS, ADDUCT_COMPATIBILITY, ADDUCT_FREQUENCIES, DIMER_FREQUENCIES
     
-    # Toujours inclure les isotopes
+    # Always include isotopes
     MASS_DIFFS = ISOTOPE_DIFFS.copy()
     
     if mode == 'positive':
         ADDUCT_DIFFS = MOD_DIFFS_POSITIVE.copy()
         DIMER_DIFFS = DIMER_DIFFS_POSITIVE.copy()
-    elif mode == 'negative':  # negative
+        ADDUCT_COMPATIBILITY = MOD_COMPATIBILITY_POSITIVE.copy()
+        ADDUCT_FREQUENCIES = MOD_FREQUENCIES_POSITIVE.copy()
+        DIMER_FREQUENCIES = DIMER_FREQUENCIES_POSITIVE.copy()
+    elif mode == 'negative':
         ADDUCT_DIFFS = MOD_DIFFS_NEGATIVE.copy()
         DIMER_DIFFS = DIMER_DIFFS_NEGATIVE.copy()
+        ADDUCT_COMPATIBILITY = MOD_COMPATIBILITY_NEGATIVE.copy()
+        ADDUCT_FREQUENCIES = MOD_FREQUENCIES_NEGATIVE.copy()
+        DIMER_FREQUENCIES = DIMER_FREQUENCIES_NEGATIVE.copy()
     else:
-        raise ValueError(f"Mode inconnu pour la configuration: {mode}")
+        raise ValueError(f"Unknown ionization mode: {mode}")
     
-    print(f"Configuration appliquée pour mode {mode}:")
-    print(f"  - Adduits: {len(ADDUCT_DIFFS)} types")
-    print(f"  - Dimères: {len(DIMER_DIFFS)} types")
+    #print(f"Configuration applied for mode {mode}:")
+    #print(f"  - Adducts: {len(ADDUCT_DIFFS)} types")
+    #print(f"  - Dimers: {len(DIMER_DIFFS)} types")
 
 
 

@@ -281,6 +281,84 @@ def compute_profile_correlations(candidate_pairs, signals_df, min_corr=0.6):
 
 
 
+
+def filter_duplicate_edge_types(edges, peaks_df):
+    """
+    Filters duplicate edge types symmetrically, allowing up to two edges 
+    of the same type per node in the same direction
+    """
+    if not edges:
+        return edges
+
+    best_target = {}
+    
+    # Pre-extract as NumPy arrays for blazing fast O(1) lookups
+    mz_vals = peaks_df['mzmed'].values
+    into_vals = peaks_df['into'].values
+    
+    # 1. Find the best target for each node, edge type, AND direction
+    for src, dst, edge_type, corr in edges:
+        src_mz = mz_vals[src]
+        dst_mz = mz_vals[dst]
+        
+        src_into = into_vals[src]
+        dst_into = into_vals[dst]
+        
+        # Determine relative direction (+1 for higher m/z, -1 for lower m/z)
+        if dst_mz > src_mz:
+            src_dir, dst_dir = 1, -1
+        elif dst_mz < src_mz:
+            src_dir, dst_dir = -1, 1
+        else:
+            # Fallback tie-breaker if m/z is exactly identical
+            src_dir = 1 if dst > src else -1
+            dst_dir = -src_dir
+            
+        # Record what 'src' thinks is the best 'dst' in this direction
+        key_src = (src, edge_type, src_dir)
+        if key_src not in best_target:
+            best_target[key_src] = (dst, dst_into)
+        else:
+            curr_dst, curr_dst_into = best_target[key_src]
+            if dst_into > curr_dst_into or (dst_into == curr_dst_into and dst > curr_dst):
+                best_target[key_src] = (dst, dst_into)
+                
+        # Record what 'dst' thinks is the best 'src' in its respective direction
+        key_dst = (dst, edge_type, dst_dir)
+        if key_dst not in best_target:
+            best_target[key_dst] = (src, src_into)
+        else:
+            curr_src, curr_src_into = best_target[key_dst]
+            if src_into > curr_src_into or (src_into == curr_src_into and src > curr_src):
+                best_target[key_dst] = (src, src_into)
+                
+    # 2. Symmetrically filter edges
+    filtered_edges = []
+    for edge in edges:
+        src, dst, edge_type, corr = edge
+        
+        src_mz = mz_vals[src]
+        dst_mz = mz_vals[dst]
+        
+        # Re-determine direction
+        if dst_mz > src_mz:
+            src_dir, dst_dir = 1, -1
+        elif dst_mz < src_mz:
+            src_dir, dst_dir = -1, 1
+        else:
+            src_dir = 1 if dst > src else -1
+            dst_dir = -src_dir
+            
+        src_wants = best_target[(src, edge_type, src_dir)][0]
+        dst_wants = best_target[(dst, edge_type, dst_dir)][0]
+        
+        # Keep the edge ONLY if both nodes agree it's their best connection for that direction
+        if src_wants == dst and dst_wants == src:
+            filtered_edges.append(edge)
+            
+    return filtered_edges
+
+
 def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt_window=None, include_profile_correlations=False, ionization_mode = None, 
                              show_progress=True, limit_component_size_value=None, debug_hanging=False,
                              eic_extraction_mode='uniform'):
@@ -430,87 +508,10 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt
     
     edges.extend(dimer_edges)
     dimer_time = time.time() - dimer_start
-    
-    if show_progress:
-        print("Step 4: Adding profile correlations between main ions...")
-    profile_start = time.time()
-    
-    include_profile_correlations = False
-    if include_profile_correlations:
-        # Collect main ions from isotope groups
-        main_ion_rois = [group['main_roi'] for group in isotope_groups]
-        if show_progress:
-            print(f"Working with {len(main_ion_rois)} main ions from isotope groups")
-        
-        if len(main_ion_rois) < 2:
-            profile_edges = []
-        else:
-            main_ion_rois_set = set(main_ion_rois)
-            
-            # Create a set of existing connections to avoid duplicates
-            existing_pairs = set()
-            for edge in edges:
-                roi1, roi2 = rois[edge[0]], rois[edge[1]]
-                if roi1 in main_ion_rois_set and roi2 in main_ion_rois_set:
-                    existing_pairs.add((min(roi1, roi2), max(roi1, roi2)))
-            
-            print(f"Found {len(existing_pairs)} existing connections between main ions")
-            log_progress(f"Found {len(existing_pairs)} existing connections between main ions")
-            
-            # Create DataFrame with just main ions, sorted by RT for efficient neighbor search
-            main_ions_df = peaks_df[peaks_df['roi'].isin(main_ion_rois_set)].copy()
-            main_ions_df = main_ions_df.sort_values('rtmeanw').reset_index(drop=True)
-            
-            # Optimized RT-proximity search using sorted data
-            rt_values = main_ions_df['rtmeanw'].values
-            roi_values_main = main_ions_df['roi'].values
-            n = len(main_ions_df)
-            
-            candidate_pairs = []
-            for i in range(n):
-                # Only search forward in sorted RT list until beyond RT_WINDOW
-                for j in range(i + 1, n):
-                    rt_diff = rt_values[j] - rt_values[i]
-                    if rt_diff > config.RT_WINDOW:
-                        break  # Stop searching, all remaining peaks too far in RT
-                    
-                    roi_pair = (min(roi_values_main[i], roi_values_main[j]), 
-                               max(roi_values_main[i], roi_values_main[j]))
-                    
-                    # Skip if already connected
-                    if roi_pair in existing_pairs:
-                        continue
-                    
-                    candidate_pairs.append((roi_values_main[i], roi_values_main[j]))
-            
-            print(f"Found {len(candidate_pairs)} new main ion pairs within RT window (after filtering existing connections and intensity ratio)")
-            log_progress(f"Found {len(candidate_pairs)} new main ion pairs within RT window")
 
-            if candidate_pairs:
-                correlation_results = compute_profile_correlations(
-                    candidate_pairs, signals_df, min_corr=config.PROFILE_CORR_THRESHOLD
-                )
-                
-                # Convert to edge format
-                profile_edges = []
-                for _, row in correlation_results.iterrows():
-                    roi_i, roi_k = row['roi_i'], row['roi_k']
-                    idx_i = roi_to_idx.get(roi_i, -1)
-                    idx_k = roi_to_idx.get(roi_k, -1)
-                    if idx_i != -1 and idx_k != -1:
-                        profile_edges.append((idx_i, idx_k, 'profile_correlation', row['correlation']))
-            else:
-                profile_edges = []
-    else:
-        print("Profile correlations disabled")
-        profile_edges = []
-                
-    
-    edges.extend(profile_edges)
-    profile_time = time.time() - profile_start
-    print(f"[TIMER] profile correlation step took {profile_time:.4f}s")
-    log_progress(f"[TIMER] profile correlation step took {profile_time:.4f}s")
-    
+
+    edges = filter_duplicate_edge_types(edges, peaks_df)
+
     if show_progress:
         print(f"Total edges created: {len(edges)}")
     
@@ -551,7 +552,7 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt
     # Print timing summary
     print(f"\nGraph construction completed in {total_time:.2f}s")
     print(f"[TIMER] build_hierarchical_graph total: {time.time() - global_step_start:.4f}s")
-    print(f"Isotope: {iso_time:.2f}s | Adduct: {adduct_time:.2f}s | Dimer: {dimer_time:.2f}s | Profile: {profile_time:.2f}s")
+    print(f"Isotope: {iso_time:.2f}s | Adduct: {adduct_time:.2f}s | Dimer: {dimer_time:.2f}s")
     print(f"Optimized correlation computation enabled")
     
 

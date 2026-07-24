@@ -119,7 +119,7 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode):
                 raw_signals,
                 signals_df,
                 file_id=None,
-                show_progress=True,
+                show_progress=False,
                 ionization_mode=ionization_mode,
                 eic_extraction_mode=eic_extraction_mode,
             )

@@ -56,6 +56,9 @@ Repository = "https://github.com/odisce/MassGAT"
 [tool.setuptools]
 packages = ["src"]
 
+[tool.setuptools.package-dir]
+"" = "src"
+
 [tool.black]
 line-length = 100
 target-version = ['py38', 'py39', 'py310', 'py311']
