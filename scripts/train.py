@@ -14,7 +14,7 @@ import pandas as pd
 
 # Local imports
 from src.data import load_synthetic_dataset, load_mzml_file
-from src.models import BaselineHierarchicalGNN, MassGAT
+from src.models import MassGAT
 from src.training import ChroMSTrainer, full_hierarchical_loss
 
 from src.utils import (setup_mlflow, log_training_params, log_training_metrics, 
@@ -145,26 +145,17 @@ def main(args):
         # Create model
         print("\n=== Model Creation ===")
         model_creation_start = time.time()
-        if args.use_synthetic:
-            if args.model_choice == 'iterative':
-                print(f"Using Iterative Hierarchical GNN model for synthetic data (block_type={args.block_type})")
-                model = MassGAT(
-                    num_features=72,
-                    hidden_dim=config['hidden_dim'],
-                    embedding_dim=config['embedding_dim'],
-                    encoder_type=config['encoder_type'],
-                    block_type=args.block_type,  # Pass block_type for ablation
-                    zero_metadata_all_nodes=args.zero_metadata_all_nodes,
-                )
-            elif args.model_choice == 'baseline':
-                print(f"Using Baseline Hierarchical GNN model for synthetic data (block_type={args.block_type})")
-                model = BaselineHierarchicalGNN(
-                    num_features=72,
-                    hidden_dim=config['hidden_dim'],
-                    embedding_dim=config['embedding_dim'],
-                    encoder_type=config['encoder_type'],
-                    block_type=args.block_type  # Pass block_type for ablation
-                )
+
+        print(f"Using Iterative Hierarchical GNN model for synthetic data (block_type={args.block_type})")
+        model = MassGAT(
+            num_features=72,
+            hidden_dim=config['hidden_dim'],
+            embedding_dim=config['embedding_dim'],
+            encoder_type=config['encoder_type'],
+            block_type=args.block_type,  # Pass block_type for ablation
+            zero_metadata_all_nodes=args.zero_metadata_all_nodes,
+        )
+
 
         model_creation_end = time.time()
         print(f"Model creation completed (Time taken: {model_creation_end - model_creation_start:.2f}s)")

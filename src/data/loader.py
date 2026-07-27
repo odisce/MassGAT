@@ -17,7 +17,6 @@ import seaborn as sns
 def reindex_graph(data_dict):
     """Reindex graph nodes using roi_values as the mapping."""
     if data_dict['edge_index'].numel() == 0:
-        print("Warning: edge_index is empty. Skipping reindexing.")
         return data_dict['edge_index'], data_dict.get('edge_attr', None)
 
     # roi_values contains the original node IDs

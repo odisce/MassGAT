@@ -122,10 +122,10 @@ To modify the default chemical rules, open `src/mass_differences.xlsx` and edit 
 
 | Sheet | Purpose | Required columns |
 |---|---|---|
-| `isotopes` | Target isotopes (e.g., ¹³C, ¹⁵N). *Synthetic data generation only.* | `name`, `diff` (exact mass difference), `freq` (expected natural abundance) |
-| `mods_positive` / `mods_negative` | Adducts and modifications per ionization mode. | `name`, `diff`, `freq` |
-| `dimers_positive` / `dimers_negative` | Possible dimer formations. | `name`, `diff`, `freq` |
-| `compat_positive` / `compat_negative` | Compatibility matrix — which modifications can chain together. *Synthetic data generation only.* | `source`, `target`, `weight` (transition weight) |
+| `isotopes` | Target isotopes (e.g., 13C, 15N). | `name`, `diff` (exact mass difference), `freq` (*Synthetic data generation only.*) |
+| `mods_positive` / `mods_negative` | Adducts and modifications per ionization mode. | `name`, `diff`, `freq`(*Synthetic data generation only.*) |
+| `dimers_positive` / `dimers_negative` | Possible dimer formations. | `name`, `diff`, `freq`(*Synthetic data generation only.*) |
+| `compat_positive` / `compat_negative` | Compatibility matrix — which modifications can chain together. *Synthetic data generation only.* | `source`, `target`, `weight` (chaining weight) |
 
 **Naming convention:** name adduct/modification rules with a `adduct_` or `loss_` prefix to ensure correct edge directionality.
 
@@ -155,19 +155,19 @@ For batch processing or execution on remote servers, run the three pipeline stag
 
 #### Running with Docker or Singularity
 
-Use **Docker** on your own machine or a server you administer. Use **Singularity/Apptainer** on shared HPC clusters, where Docker is typically disabled for security reasons (it requires root/daemon privileges that Singularity avoids) but Singularity is usually pre-installed.
+Use **Docker** on your own machine or a server. Use **Singularity/Apptainer** on shared HPC clusters, where Docker is disabled for security reasons.
 
-Commands are identical to the local ones below either way — just add a prefix to run them inside the container, mounting your current folder.
+Commands are identical to the local ones below  — just add a prefix to run them inside the container, mounting your current folder.
 
 **Docker:**
 ```bash
-docker run --gpus all -v $(pwd):/app -w /app odisce/massgat:latest <command>
+docker run --gpus all -v $(pwd):/app -w /app massgat:latest <command>
 ```
 *(Drop `--gpus all` if using CPU only.)*
 
 Example:
 ```bash
-docker run --gpus all -v $(pwd):/app -w /app odisce/massgat:latest Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
+docker run --gpus all -v $(pwd):/app -w /app massgat:latest Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
 ```
 
 **Singularity:**
@@ -262,7 +262,7 @@ python scripts/demo_generate_graphs.py --family true_with_noise --num 10000 --ou
 
 Basic training with default hyperparameters:
 ```bash
-python scripts/train.py --use_synthetic --synthetic_path synthetic_dataset/training_data --num_epochs 15 --batch_size 64 --learning_rate 0.0003 --seed 42
+python scripts/train.py --use_synthetic --synthetic_path synthetic_dataset --num_epochs 15 --batch_size 64 --learning_rate 0.0003 --seed 42
 ```
 
 **Key training arguments:**
