@@ -7,4 +7,9 @@
 *.html
 *.feather
 *.tsv
-__pycache__/
+__pycache__/# pixi environments
+.pixi*
+!.pixi/config.toml
+*_output
+*results*
+*graph*

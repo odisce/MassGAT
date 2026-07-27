@@ -14,15 +14,21 @@ The pipeline runs in four stages — Trace Segmentation → Graph Construction �
 ---
 
 ## Table of Contents
-- [Requirements](#requirements)
-- [Installation](#installation)
-  - [Option A: HPC / Slurm (Recommended)](#option-a-hpc--slurm-recommended)
-  - [Option B: Local Workstation](#option-b-local-workstation-linuxmacoswindows)
-- [Usage](#usage)
-  - [Interactive Tutorial](#interactive-tutorial)
-  - [Command Line Interface (CLI)](#command-line-interface-cli)
-- [Repository Structure](#repository-structure)
-- [Citation](#citation)
+
+- [MassGAT](#massgat)
+  - [Table of Contents](#table-of-contents)
+  - [Requirements](#requirements)
+  - [Installation (Local)](#installation-local)
+    - [Option A: Singularity / Docker](#option-a-singularity--docker)
+    - [Option B : Local (Linux/MacOS/Windows)](#option-b--local-linuxmacoswindows)
+      - [Prerequisites](#prerequisites)
+      - [Set-up the environment](#set-up-the-environment)
+  - [Configuration](#configuration)
+  - [Usage](#usage)
+    - [Interactive Tutorial](#interactive-tutorial)
+    - [Command Line Interface](#command-line-interface)
+  - [Training](#training)
+  - [Citation](#citation)
 
 ## Requirements
 
@@ -31,6 +37,7 @@ Installing **MassGAT** can be done from a local environment or directly inside c
 - **Containers:** [Docker](https://docs.docker.com/) (Windows, Ubuntu) or [Apptainer](https://apptainer.org/) (Ubuntu).
 
 
+## Installation
 
 ## Installation
 
@@ -58,6 +65,7 @@ pixi run install-ionshed
 
 ## Configuration
 
+
 MassGAT allows you to tune the analytical pipeline without modifying the source code via the config.yaml file located in the root directory. Key sections include:
 
 1. **Peak Picking (peak_picking):** Configure standard LC-MS parameters (ppm, rttol) passed directly to the [ionshed](https://github.com/odisce/ionshed) segmentation algorithm.
@@ -71,6 +79,7 @@ MassGAT allows you to tune the analytical pipeline without modifying the source 
 
 ### Interactive Tutorial
 
+We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT pipeline ([ionshed](https://github.com/odisce/ionshed) segmentation, graph construction, inference, and component vizualization) on a test file.
 We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT pipeline ([ionshed](https://github.com/odisce/ionshed) segmentation, graph construction, inference, and component vizualization) on a test file.
 
 1. Create a directory in the `data` folder with your project name, create a `mzml` subdirectory, and place your .mzML (or .mzXML) files inside it. For testing, you can also use the provided test file in the `data/test` folder.
@@ -86,7 +95,6 @@ We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT
 ### Command Line Interface
 
 For batch processing or execution on remote servers, you can run the pipeline sequentially from the terminal.
-
 
 **Data Preparation**
 A small example is provided in a project called `test` and can be run directly but if to use other files:

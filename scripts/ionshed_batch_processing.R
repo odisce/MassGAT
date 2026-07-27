@@ -83,7 +83,7 @@ process_file <- function(file_path, output_folder) {
         
         # Compute the peak list and the signals
         cat("Computing peak list...\n")
-        res <- SpMat_DescendingPeakPicking(MSnExpObj, rttol = RTTOL, ppm = PPM, mz_res = MZ_RES, rt_res = RT_RES)
+        res <- ionshed(MSnExpObj, rttol = RTTOL, ppm = PPM, mz_res = MZ_RES, rt_res = RT_RES)
         cat("Peak list computed\n")
 
         if (!is.null(res$peak_info)) {
