@@ -36,6 +36,28 @@ load_config <- function(config_path = NULL) {
     return(config)
 }
 
+save_config_metadata <- function(output_file, config, relevant_keys) {
+    metadata_file <- sub("\\.feather$", ".config.json", output_file)
+    relevant_config <- config[relevant_keys]
+    relevant_config <- Filter(Negate(is.null), relevant_config)
+    writeLines(jsonlite::toJSON(relevant_config, pretty = TRUE), metadata_file)
+}
+
+config_changed <- function(output_file, config, relevant_keys) {
+    metadata_file <- sub("\\.feather$", ".config.json", output_file)
+    if (!file.exists(metadata_file)) {
+        return(TRUE)
+    }
+    tryCatch({
+        stored_config <- jsonlite::fromJSON(readLines(metadata_file))
+        current_config <- config[relevant_keys]
+        current_config <- Filter(Negate(is.null), current_config)
+        return(!identical(stored_config, current_config))
+    }, error = function(e) {
+        return(TRUE)
+    })
+}
+
 # Load configuration
 config <- load_config()
 RTTOL <- config$peak_picking$rttol
@@ -53,7 +75,7 @@ cat("  XIC_RTTOL:", XIC_RTTOL, "\n")
 
 
 # Function to process a single mzML/mzXML file
-process_file <- function(file_path, output_folder) {
+process_file <- function(file_path, output_folder, force = FALSE, config = NULL) {
     # Check if folder exists and create it if not
     if (!dir.exists(output_folder)) {
         dir.create(output_folder, recursive = TRUE)
@@ -70,7 +92,13 @@ process_file <- function(file_path, output_folder) {
     peak_output <- file.path(output_folder, paste0(base_path, "_peak.feather"))
     roi_output <- file.path(output_folder, paste0(base_path, "_signal.feather"))
     
-    if (file.exists(peak_output) && file.exists(roi_output)) {
+    skip <- file.exists(peak_output) && file.exists(roi_output) && !force
+    if (skip && !is.null(config) && config_changed(peak_output, config, names(config$peak_picking))) {
+        cat("CONFIG CHANGED: Reprocessing", base_path, "\n")
+        skip <- FALSE
+    }
+    
+    if (skip) {
         cat("Output files already exist for", base_path, "- skipping\n")
         return(list(status = "skipped", file = base_path))
     }
@@ -109,6 +137,9 @@ process_file <- function(file_path, output_folder) {
         cat("Saving results...\n")
         write_feather(res$peak_info, peak_output)
         write_feather(res$roi_data, roi_output)
+        if (!is.null(config)) {
+            save_config_metadata(peak_output, config, names(config$peak_picking))
+        }
         
         time2 <- Sys.time()
         processing_time <- difftime(time2, time1, units = "mins")
@@ -137,7 +168,7 @@ process_file <- function(file_path, output_folder) {
 }
 
 # Function to process all mzML/mzXML files in a directory
-process_all_files <- function(input_folder, output_folder) {
+process_all_files <- function(input_folder, output_folder, force = FALSE) {
     cat("=======================================================\n")
     cat("Ionshed Batch Processing\n")
     cat("=======================================================\n")
@@ -183,7 +214,7 @@ process_all_files <- function(input_folder, output_folder) {
         cat("File:", basename(file_path), "\n")
         
         # Process the file
-        result <- process_file(file_path, output_folder)
+        result <- process_file(file_path, output_folder, force = force, config = config)
         results[[i]] <- result
         
         # Print progress
@@ -252,6 +283,13 @@ main <- function() {
     # 1. Capture command-line arguments
     args <- commandArgs(trailingOnly = TRUE)
     
+    force <- FALSE
+    # Check for --force flag
+    if ("--force" %in% args) {
+        force <- TRUE
+        args <- args[args != "--force"]
+    }
+    
     # 2. Check if running in container environment or via CLI args
     if (file.exists("/workspace") && file.exists("/data")) {
         cat("Running in Singularity container environment\n")
@@ -262,7 +300,7 @@ main <- function() {
         output_folder <- args[2]
     } else {
         cat("ERROR: Missing arguments.\n")
-        cat("Usage: Rscript ionshed_batch_processing.R <input_folder> <output_folder>\n")
+        cat("Usage: Rscript ionshed_batch_processing.R <input_folder> <output_folder> [--force]\n")
         quit(status = 1)
     }
     
@@ -276,10 +314,9 @@ main <- function() {
     sink(log_file, split = TRUE)
     
     exit_code <- 0
-    
     tryCatch({
         # Process all files
-        results <- process_all_files(input_folder, output_folder)
+        results <- process_all_files(input_folder, output_folder, force = force)
         
         # Exit with appropriate code
         error_count <- sum(sapply(results, function(x) x$status == "error"))

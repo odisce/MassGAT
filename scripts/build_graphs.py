@@ -10,10 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+import yaml
 
 try:
     from src.data.hierarchical_graph_construction import build_hierarchical_graph
     from src.config import MIN_SIGNALS
+    from src.utils.config_utils import config_changed, save_config_metadata
 except ModuleNotFoundError:
     # Allow direct execution of this file (python path/to/script.py)
     project_root = Path(__file__).resolve().parents[2]
@@ -21,6 +23,7 @@ except ModuleNotFoundError:
         sys.path.insert(0, str(project_root))
     from src.data.hierarchical_graph_construction import build_hierarchical_graph
     from src.config import MIN_SIGNALS
+    from src.utils.config_utils import config_changed, save_config_metadata
 
 
 def log(message):
@@ -52,7 +55,7 @@ def find_matching_signal(peak_file):
     return None
 
 
-def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode):
+def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, force=False):
 
     start = time.time()
     peak_files = sorted(input_dir.glob("*peak*.feather"))
@@ -62,6 +65,13 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode):
     if not peak_files:
         log("ERROR: No *peak*.feather files found")
         return 1
+    
+    config_path = Path(__file__).resolve().parents[1] / 'config.yaml'
+    if config_path.exists():
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    else:
+        config = {}
 
     file_pairs: list[tuple[Path, Path]] = []
     for peak_file in peak_files:
@@ -90,7 +100,12 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode):
         out_name = f"graph_{base_name}"
         out_file = output_dir / f"{out_name}.pt"
 
-        if out_name in existing:
+        skip = out_name in existing and not force
+        if skip and config and config_changed(out_file, config, ['graph', 'thresholds']):
+            log(f"CONFIG CHANGED: Reprocessing {out_file.name}")
+            skip = False
+        
+        if skip:
             log(f"SKIP: {out_file.name} already exists")
             skipped += 1
             continue
@@ -138,6 +153,8 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode):
                 },
                 str(out_file),
             )
+            if config:
+                save_config_metadata(out_file, config, ['graph', 'thresholds'])
             log(f"Saved: {out_file}")
             processed += 1
 
@@ -170,6 +187,12 @@ def parse_args():
         default="uniform",
         help="How to reduce EIC points to fixed length",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force reprocessing even if output files already exist",
+    )
     return parser.parse_args()
 
 
@@ -183,6 +206,7 @@ def main():
         args.output_dir,
         args.ionization_mode,
         args.eic_extraction_mode,
+        force=args.force,
     )
 
 

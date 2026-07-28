@@ -118,10 +118,20 @@ Run the IonShed script to extract peaks and Region of Interest (ROI) signals int
 Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
 ```
 
+**Configuration Change Detection:** If you modify parameters in `config.yaml` (e.g., `ppm`, `rttol`, `mz_res`, etc.), the script automatically detects the change and reprocesses files. To force reprocessing without changing config, use:
+```bash
+Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output --force
+```
+
 **2. Graph Construction (Python)**
 Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
 ```bash
-python scripts/build_graphs.py --input_dir  data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive
+python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive
+```
+
+**Configuration Change Detection:** If you modify graph parameters in `config.yaml` (e.g., `rt_window`, `mz_tolerance`, correlation thresholds), the script automatically detects and reprocesses. To force reprocessing without changing config:
+```bash
+python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive --force
 ```
 
 **3. Model Inference (Python)**
@@ -138,6 +148,21 @@ Use `weights/model_negative.pth` for negative-mode data, matching the `--ionizat
 Key arguments:
 - `--min_node_prob`: probability threshold above which a peak is kept (default: `0.5`).
 - `--with_top_annotations`: also outputs the top 5 candidate annotations per component, as ranked by the annotation heuristic.
+
+### Configuration Management & Change Detection
+
+The pipeline automatically detects when parameters in `config.yaml` change, ensuring reproducibility:
+
+- **Trace Segmentation** tracks: `peak_picking` parameters (ppm, rttol, mz_res, rt_res, xic_rttol)
+- **Graph Construction** tracks: `graph` and `thresholds` sections (rt_window, mz_tolerance, correlation thresholds)
+- Config metadata is stored as hidden `.config_*.json` files in output directories
+
+**Behavior:**
+1. On first run or when config changes → files are reprocessed automatically
+2. If config remains unchanged → existing files are reused (skip processing)
+3. To force reprocessing without config changes, use `--force` flag
+
+This ensures that changing configuration parameters automatically triggers a rebuild, preventing issues where old parameter values would be silently reused with new settings.
 
 
 ### Understanding the Output
