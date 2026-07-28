@@ -16,23 +16,24 @@ The pipeline runs in four stages — Trace Segmentation → Graph Construction �
 ## Table of Contents
 - [Requirements](#requirements)
 - [Installation](#installation)
-  - [Option A: Docker](#option-a-docker)
-  - [Option B: Local install (Linux/MacOS/Windows)](#option-b-local-install-linuxmacoswindows)
+  - [Local (Linux/MacOS/Windows)](#local-linuxmacoswindows)
+    - [Set-up the environment](#set-up-the-environment)
+    - [Install R dependencies](#install-r-dependencies)
 - [Configuration](#configuration)
-  - [Chemical Rules & Mass Differences](#chemical-rules-mass-differences-mass_differencesxlsx)
 - [Usage](#usage)
-  - [Interactive Tutorial (recommended for first use)](#interactive-tutorial-recommended-for-first-use)
-  - [Command Line Interface (CLI)](#command-line-interface-cli)
-    - [Running with Docker or Singularity](#running-with-docker-or-singularity)
-    - [Step 1 — Trace Segmentation (R)](#step-1-trace-segmentation-r)
-    - [Step 2 — Graph Construction (Python)](#step-2-graph-construction-python)
-    - [Step 3 — Model Inference (Python)](#step-3-model-inference-python)
+  - [Interactive Tutorial](#interactive-tutorial)
+  - [Command Line Interface](#command-line-interface)
+    - [1. Trace Segmentation (R)](#1-trace-segmentation-r)
+    - [2. Graph Construction (Python)](#2-graph-construction-python)
+    - [3. Model Inference (Python)](#3-model-inference-python)
+  - [Configuration Management & Change Detection](#configuration-management-change-detection)
   - [Understanding the Output](#understanding-the-output)
 - [Training a Custom Model](#training-a-custom-model)
   - [Step 1: Generate Synthetic Training Data](#step-1-generate-synthetic-training-data)
   - [Step 2: Train MassGAT](#step-2-train-massgat)
 - [Performance & System Notes](#performance-system-notes)
 - [Citation](#citation)
+
 
 
 ## Requirements
