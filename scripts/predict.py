@@ -266,8 +266,8 @@ def main(args):
 
     # Stream CSV writes
     assembly_start = time.time()
-    metadata_output_csv = str(target_tsv.with_name(f"{target_tsv.stem}_metadata.tsv"))
-
+    output_per_file = args.output_per_file
+    
     # XCMS compatible headers
     meta_fields = ['mz', 'mzmin', 'mzmax', 'rt', 'rtmin', 'rtmax', 'into', 'maxo', 'sample', 
                    'file_name', 'component_id', 'roi_id', 'node_prob', 'graph_prob'] + [f'top_annotation_{k+1}' for k in range(5)]
@@ -276,9 +276,18 @@ def main(args):
     t_annotations = 0.0
     t_metadata = 0.0
 
-    metadata_cm = open(metadata_output_csv, 'w', newline='')
-    meta_writer = csv.DictWriter(metadata_cm, fieldnames=meta_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
-    meta_writer.writeheader()
+    # Setup output file handling
+    if output_per_file:
+        # One file per input file
+        file_writers = {}  # fname -> (file_handle, csv_writer)
+        metadata_output_csv = None  # Not used in per-file mode
+    else:
+        # Combined output file
+        metadata_output_csv = str(target_tsv.with_name(f"{target_tsv.stem}_peaks.tsv"))
+        metadata_cm = open(metadata_output_csv, 'w', newline='')
+        meta_writer = csv.DictWriter(metadata_cm, fieldnames=meta_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
+        meta_writer.writeheader()
+        file_writers = None
 
     try:
         total_files = len(file_names)
@@ -392,7 +401,7 @@ def main(args):
                         if int(roi) in roi_mzmin_mzmax_map:
                             mzmin_v, mzmax_v = roi_mzmin_mzmax_map[int(roi)]
 
-                        meta_writer.writerow({
+                        row_data = {
                             'mz': float(mz_v),
                             'mzmin': mzmin_v,
                             'mzmax': mzmax_v,
@@ -408,7 +417,20 @@ def main(args):
                             'node_prob': float(p_v),
                             'graph_prob': float(graph_prob) if graph_prob is not None else np.nan,
                             **top_ann_cols,
-                        })
+                        }
+                        
+                        if output_per_file:
+                            # Initialize writer for this file if not already done
+                            if fname not in file_writers:
+                                output_fname = os.path.join(str(output_dir), fname.replace('.pt', '.tsv'))
+                                fm = open(output_fname, 'w', newline='')
+                                fw = csv.DictWriter(fm, fieldnames=meta_fields, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
+                                fw.writeheader()
+                                file_writers[fname] = (fm, fw)
+                            file_writers[fname][1].writerow(row_data)
+                        else:
+                            meta_writer.writerow(row_data)
+                        
                         n_meta_rows += 1
                     t_metadata += time.perf_counter() - meta_start
 
@@ -422,10 +444,23 @@ def main(args):
                         f"{rate:.0f} rows/s | elapsed {elapsed:.1f}s | eta {remaining:.1f}s")
                         
     finally:
-        metadata_cm.close()
+        if output_per_file:
+            # Close all per-file writers
+            for fname, (fm, fw) in file_writers.items():
+                fm.flush()
+                os.fsync(fm.fileno())
+                fm.close()
+        else:
+            # Close combined file
+            metadata_cm.flush()
+            os.fsync(metadata_cm.fileno())
+            metadata_cm.close()
 
     total_assembly = time.time() - assembly_start
-    print(f'Metadata saved to {metadata_output_csv} with {n_meta_rows} rows. Processed in {t_metadata:.2f}s.')
+    if output_per_file:
+        print(f'Peak data saved to {len(file_writers)} files in {output_dir} with {n_meta_rows} total rows. Processed in {t_metadata:.2f}s.')
+    else:
+        print(f'Peak data saved to {metadata_output_csv} with {n_meta_rows} rows. Processed in {t_metadata:.2f}s.')
     print(f'Annotation total time: {t_annotations:.2f}s.')
     print(f'CSV assembly completed in {total_assembly:.2f} seconds.')
 
@@ -449,6 +484,7 @@ if __name__ == '__main__':
     parser.add_argument('--skip_metadata', action='store_true', default=False)
     parser.add_argument('--skip_top_annotations', action='store_true', default=True)
     parser.add_argument('--with_top_annotations', dest='skip_top_annotations', action='store_false')
+    parser.add_argument('--output_per_file', action='store_true', default=False, help='Save one peak file per input file (named as input file) instead of combined output')
     
     # New options for filtering and optimization
     parser.add_argument('--min_node_prob', type=float, default=0.5, help='Keep peaks with node_prob >= threshold')

@@ -17,9 +17,9 @@ peak_picking:
 
 # Correlation Thresholds (tune for linking behavior)
 thresholds:
-  isotope_corr: 0.6                # Correlation threshold for isotope linking
-  adduct_corr: 0.85                 # Correlation threshold for adduct linking
-  dimer_corr: 0.85                 # Correlation threshold for dimer linking
+  isotope_corr: 0.5                # Correlation threshold for isotope linking
+  adduct_corr: 0.8                 # Correlation threshold for adduct linking
+  dimer_corr: 0.8                 # Correlation threshold for dimer linking
   isotope_37cl_ratio: 0.2          # 37Cl isotope minimum intensity ratio
 
 # Model Inference Parameters

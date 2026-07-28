@@ -14,21 +14,26 @@ The pipeline runs in four stages — Trace Segmentation → Graph Construction �
 ---
 
 ## Table of Contents
+- [Requirements](#requirements)
+- [Installation](#installation)
+  - [Option A: Docker](#option-a-docker)
+  - [Option B: Local install (Linux/MacOS/Windows)](#option-b-local-install-linuxmacoswindows)
+- [Configuration](#configuration)
+  - [Chemical Rules & Mass Differences](#chemical-rules-mass-differences-mass_differencesxlsx)
+- [Usage](#usage)
+  - [Interactive Tutorial (recommended for first use)](#interactive-tutorial-recommended-for-first-use)
+  - [Command Line Interface (CLI)](#command-line-interface-cli)
+    - [Running with Docker or Singularity](#running-with-docker-or-singularity)
+    - [Step 1 — Trace Segmentation (R)](#step-1-trace-segmentation-r)
+    - [Step 2 — Graph Construction (Python)](#step-2-graph-construction-python)
+    - [Step 3 — Model Inference (Python)](#step-3-model-inference-python)
+  - [Understanding the Output](#understanding-the-output)
+- [Training a Custom Model](#training-a-custom-model)
+  - [Step 1: Generate Synthetic Training Data](#step-1-generate-synthetic-training-data)
+  - [Step 2: Train MassGAT](#step-2-train-massgat)
+- [Performance & System Notes](#performance-system-notes)
+- [Citation](#citation)
 
-- [MassGAT](#massgat)
-  - [Table of Contents](#table-of-contents)
-  - [Requirements](#requirements)
-  - [Installation (Local)](#installation-local)
-    - [Option A: Singularity / Docker](#option-a-singularity--docker)
-    - [Option B : Local (Linux/MacOS/Windows)](#option-b--local-linuxmacoswindows)
-      - [Prerequisites](#prerequisites)
-      - [Set-up the environment](#set-up-the-environment)
-  - [Configuration](#configuration)
-  - [Usage](#usage)
-    - [Interactive Tutorial](#interactive-tutorial)
-    - [Command Line Interface](#command-line-interface)
-  - [Training](#training)
-  - [Citation](#citation)
 
 ## Requirements
 
@@ -36,8 +41,6 @@ Installing **MassGAT** can be done from a local environment or directly inside c
 - **Local:** [Pixi >= 0.73](https://pixi.prefix.dev/latest/) and on Windows: [Rtools](https://cran.r-project.org/bin/windows/Rtools/).
 - **Containers:** [Docker](https://docs.docker.com/) (Windows, Ubuntu) or [Apptainer](https://apptainer.org/) (Ubuntu).
 
-
-## Installation
 
 ## Installation
 
