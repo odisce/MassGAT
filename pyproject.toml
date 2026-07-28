@@ -1,12 +1,8 @@
-[build-system]
-requires = ["setuptools>=65.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "massgat"
+requires-python = ">=3.8,<=3.11"
 version = "0.1.0"
-description = "MassGAT: a graph-based collective learning approach for untargeted detection and annotation of LC-MS data"
-readme = "README.md"
+license = "CECILL-2.1"
 authors = [
   { name = "Paul-Henri Pinart", email = "Paul-Henri.PINART@cea.fr" },
   { name = "Sylvain Dechaumet", email = "sylvain.dechaumet@cea.fr" },
@@ -15,75 +11,35 @@ authors = [
 maintainers = [
   { name = "Paul-Henri Pinart", email = "Paul-Henri.PINART@cea.fr" }
 ]
-requires-python = ">=3.8"
-license = {text = "CeCILL"}
 keywords = ["machine-learning", "graph-neural-networks", "lc-ms", "metabolomics"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3.9",
-    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering :: Bio-Informatics"
 ]
-
 dependencies = [
-    "pandas>=1.5.0",
-    "numpy>=1.22.0", 
-    "scipy>=1.8.0",
-    "scikit-learn>=1.0.0",
-    "matplotlib>=3.5.0",
-    "seaborn>=0.12.0",
-    "torch>=2.0.0", 
-    "torchvision",
-    #"torch-scatter",
-    #"torch-sparse",
-    # "torch-cluster",
-    "torch-geometric>=2.3.0",
-    "pyyaml",
-    "tqdm",
-    "numba",
-    "openpyxl",
-    "pyarrow",
-    "mlflow",
-    "plotly",
+  "torch>=2.0.0",
+  "mlflow",
+  "pandas",
+  "numpy>=1.22.0",
+  "torch-geometric",
+  "pyyaml",
+  "openpyxl",
+  "scipy",
+  "matplotlib",
+  "seaborn",
+  "pyarrow",
+  "scikit-learn",
+  "protobuf"
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "black>=22.0",
-    "flake8>=4.0",
-    "isort>=5.0",
-    "mypy>=0.950",
-]
-docs = [
-    "sphinx>=4.0",
-    "sphinx-rtd-theme>=1.0",
-]
-
-# Note: R packages (xcms, MSnbase, ionshed) must be installed separately (use the Dockerfile or install via R directly)
-
-[project.urls]
-Repository = "https://github.com/odisce/MassGAT"
-
-[tool.setuptools]
-packages = ["src"]
-
-[tool.black]
-line-length = 100
-target-version = ['py38', 'py39', 'py310', 'py311']
-
-[tool.isort]
-profile = "black"
-line_length = 100
-
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.pixi.workspace]
-channels = ["conda-forge", "r"]
+channels = ["conda-forge"]
 platforms = [
   "win-64",
   "linux-64",
@@ -91,11 +47,23 @@ platforms = [
   { name = "linux-64-cuda", platform = "linux-64", cuda = "12.6" }
 ]
 
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pixi.dependencies]
+compilers = "*"
+cmake = "*"
+make = "*"
+r-base = ">=4.5.0"
+r-arrow = ">=25.0.0"
+r-yaml = ">=2.3.12"
+
+
 [tool.pixi.feature.gpu]
 platforms = ["linux-64-cuda", "win-64-cuda"]
 
 [tool.pixi.feature.gpu.dependencies]
-cuda-version = "12.*"
+cuda-version = ">=12.0"
 pytorch-gpu = ">=2.0.0"
 
 [tool.pixi.feature.cpu]
@@ -107,13 +75,6 @@ pytorch-cpu = ">=2.0.0"
 [tool.pixi.pypi-dependencies]
 massgat = { path = ".", editable = true }
 
-[tool.pixi.dependencies]
-compilers = "*"
-cmake = "*"
-make = "*"
-r-base = ">=4.5.0"
-r-arrow = "*"
-
 [tool.pixi.environments]
 default = { features = ["cpu"] }
 gpu = { features = ["gpu"] }
@@ -123,5 +84,3 @@ cpu = { features = ["cpu"] }
 test-gpu = "python -c 'import torch; print(torch.cuda.is_available())'"
 install-ionshed = "Rscript environment/install_package.R"
 
-[package.build] 
-backend = { name = "pixi-build-r", version = "0.*" }

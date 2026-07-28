@@ -94,9 +94,9 @@ process_file <- function(file_path, output_folder) {
         }
         # Extract the XICs
         roi_res <- tryCatch({
-            extract_XICs(roi_ls = res, rttol = XIC_RTTOL)
+            extract_xics(roi_ls = res, rttol = XIC_RTTOL)
         }, error = function(e) {
-            cat("Error in extract_XICs:", e$message, "\n")
+            cat("Error in extract_xics:", e$message, "\n")
             return(NULL)
         })
         if (!is.null(roi_res)) {
