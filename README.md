@@ -92,17 +92,20 @@ The trace segmentation and graph construction steps automatically detect when re
     ```
 
 
-3. **Model Inference (Python)**:
-TODO : tableau
-Pass the constructed graphs through the trained MassGAT model. This step evaluates probabilities, groups peaks into chemical components, and optionally annotates them.
-    - `--min_node_prob`: probability threshold above which a peak is kept (default: `0.5`).
-    - `--with_top_annotations`: also outputs the top 5 candidate annotations per component, as ranked by the annotation heuristic.
-    - `--weights`: path to the trained model weights (e.g. `weights/model_positive.pth` for positive-mode data, `weights/model_negative.pth` for negative-mode data).
-    - `--output_dir`: Results are written to the directory you specified (e.g. `data/test/results`)
-
+3. **Model Inference (Python)**: Pass the constructed graphs through the trained MassGAT model. This step evaluates probabilities, groups peaks into chemical components, and optionally annotates them.
     ```bash
-    python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
+    python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
     ```
+
+    **Key inference arguments:**
+
+    | Argument | Description | Default |
+    |---|---|---|
+    | `--folder` | Path to the directory containing graph files (`.pt` format) | — |
+    | `--weights` | Path to trained model weights (e.g., `weights/model_positive.pth` for positive-mode, `weights/model_negative.pth` for negative-mode) | — |
+    | `--output_dir` | Directory where results will be saved | — |
+    | `--min_node_prob` | Probability threshold above which a peak is kept | `0.5` |
+    | `--with_top_annotations` | Also output top 5 candidate annotations per component | — |
 
 
 > **Note**
@@ -112,9 +115,9 @@ Pass the constructed graphs through the trained MassGAT model. This step evaluat
 
 #### Outputs
 
-TODO : rajouter ionshed + graphes
+- **Segmented ionshed features** in `.feather` format in subfolder `ionshed_output` of your project.
+- **Graph representations** in `.pt` format in subfolder `graphs` of your project.
 - **A final peak list** with detection probabilities and, if `--with_top_annotations` was used at Step 3, the top-ranked candidate annotations per component (main ion, isotopes, adducts, losses, dimers).
-- **Pseudo-spectra visualizations** per-component views of validated ion species (m/Z vs. intensity) alongside their elution profiles.
 
 ### Training
 
@@ -129,9 +132,9 @@ To retrain MassGAT on custom or synthetic data, first generate synthetic trainin
 
     | Value | Description |
     |---|---|
-    | `true_with_noise` | True peaks with chemical relationships (isotopes, adducts, dimers) + noise peaks |
-    | `true` | True peaks only, with chemical relationships |
-    | `false` | False peaks only (noise) |
+    | `true` | True peaks component only |
+    | `false` | False peaks component only (noise) |
+    | `true_with_noise` | True peaks component with false peaks included |
     | `true_single` | Single isolated true peaks |
     | `false_single` | Single isolated false peaks |
 
@@ -157,10 +160,9 @@ To retrain MassGAT on custom or synthetic data, first generate synthetic trainin
     | `--embedding_dim` | Embedding dimension | `24` |
     | `--encoder_type` | Signal encoder: `transformer` or `cnn` | `transformer` |
     | `--block_type` | GNN block type: `gate`, `gat`, or `gcn` | `gate` |
-    | `--augmentation` | Data augmentation: `none`, `node_drop`, `edge_drop`, `feature_noise`, `feature_mask`, `mixed` | `none` |
     | `--seed` | Random seed for reproducibility | `42` |
 
-    Trained weights are saved to the `weights/` directory, named after the ionization `--mode` used during data generation (e.g. `model_positive.pth`, `model_negative.pth`) — matching the files you'd point `predict.py` at in [Step 3: Model Inference](#3-model-inference-python).
+    Trained weights are saved to the `weights/` directory, named after the ionization `--mode` used during data generation (e.g. `model_positive.pth`, `model_negative.pth`) — matching the files you'd point `predict.py` at in Step 3 of the [Prediction](#prediction) section above.
 
     **Tracking experiments with MLflow:**
     ```bash

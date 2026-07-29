@@ -468,7 +468,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Predict with trained MassGAT or Baseline model')
     parser.add_argument('--folder', type=str, help='Folder containing .pt files or .npy files')
-    parser.add_argument('--data_type', type=str, default='synthetic', choices=['synthetic', 'real'], help='Type of data')
+    parser.add_argument('--data_type', type=str, default='real', choices=['synthetic', 'real'], help='Type of data')
     parser.add_argument('--weights', type=str, required=True, help='Path to model weights (.pth or .pt)')
     parser.add_argument('--output', type=str, default='predictions.tsv', help='Output CSV file')
     parser.add_argument('--output_dir', type=str, default=None, help='Output directory')
