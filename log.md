@@ -1,5 +1,44 @@
 ## TO DELETE
 
+### 28 JULY 2026
+  - removed Table of Contents](#table-of-contents) in Table of content
+  - rewritten the Table of content to match sections
+  - added interactive links to file (e.g.: [`config.yaml`](config.yaml))
+  - missing ipywidgets dependency
+  - [TODO] Convert all french message to english (e.g.: Mode d'ionisation détecté) but there are others
+  - [TODO] Clean unnecessary files, some script are neither described or used (e.g.: xcms_alignement.R, ...) remove them or describe them in the readme.
+  - trailing "," in classifiers section
+  - some heavy dependencies which seems to overlap (torch, pytorch, mlflow)
+  - [FAILING] Can't reproduce jupyter dependencies due to rpy2 which constrains all the others and fails
+  - Comments with instructions to install inside the .toml removed, it should be stated in the readme
+  - [IMPROVEMENT] There are scripts duplication between files in ./scripts and the jupyter notebook.
+                  To avoid mismatch or breaking change the common script should be in a single file which define
+                  the common functions/wrappers which are then called in both medias.
+  - la section training fait partie des usages -> déplacé dedands
+  - [IMPROVEMENT]  some dependencies are specific for vizu and jupyter, not needed for the CLI commands and should be separated (not included in the computational scripts)
+  - [IMPROVEMENT]  Adding a very small .mzml file to run unitary tests
+  - [IMPROVEMENT]  Adding unitary tests
+  - recompilation en partant avec un .toml vide
+    - problem when adding mlflow, dependencies conflict
+    - not sure why mlflow is needed for predict.py ?
+  - [BUG] Warning during inference to solve:  UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+
+### 27 JULY 2026
+  - Description to create a project folder for user is duplicated in Interactive tutorial and Command line interface.
+    - written on time at the beginning
+    - also suggest user to use the provided `test` project
+    - Jupyter module not needed, already installed by pixi
+    - put notebook in doc/ and change to a link:  Open the `massgat.ipynb`
+      -  changed to [doc/massgat.ipynb](doc/massgat.ipynb)
+    - xlsx file starting with ~ are temporary filew when opened on a computer, they should,'t be included
+      - removed all ^~* files
+      - added gitignore on them
+    - Trying jupyter notebook
+      - Added dependencies `ipykernel` and `notebook` needed to run jupyter notebook
+      - missing rpy2 dependency in .toml
+      
+
+
 ### 24 JULY 2026
 
   - missing R dependencies (arrow) not from ionshed and not mentionned, added to the .toml

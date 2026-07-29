@@ -8,8 +8,12 @@
 *.feather
 *.tsv
 __pycache__/# pixi environments
-.pixi*
-!.pixi/config.toml
 *_output
 *results*
 *graph*
+~*.xlsx
+.pixi/*
+!.pixi/config.toml
+*/**/*egg-info/**
+*egg-info/**
+.vscode*

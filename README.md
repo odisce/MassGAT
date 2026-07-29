@@ -9,6 +9,7 @@ Instead of treating peak detection and annotation as two separate steps, MassGAT
 A Graph Attention Network (GAT) then jointly decides which nodes are true peaks and which edges are true chemical links, using the redundancy between related ion species to rescue valid but low-intensity signals that single-peak methods would discard.
 
 ![MassGAT Pipeline](docs/massgat_overview_horizontal.png)
+
 The pipeline runs in four stages — Trace Segmentation → Graph Construction → Model Inference → Annotation — matching the sections under [Usage](#usage) below.
 
 ---
@@ -16,158 +17,212 @@ The pipeline runs in four stages — Trace Segmentation → Graph Construction �
 ## Table of Contents
 - [Requirements](#requirements)
 - [Installation](#installation)
-  - [Local (Linux/MacOS/Windows)](#local-linuxmacoswindows)
-    - [Set-up the environment](#set-up-the-environment)
-    - [Install R dependencies](#install-r-dependencies)
+  - [Option A: Docker](#option-a-docker)
+  - [Option B: Local install](#option-b-local-install)
 - [Configuration](#configuration)
+  - [Chemical Rules & Mass Differences](#chemical-rules--mass-differences-mass_differencesxlsx)
 - [Usage](#usage)
-  - [Interactive Tutorial](#interactive-tutorial)
-  - [Command Line Interface](#command-line-interface)
-    - [1. Trace Segmentation (R)](#1-trace-segmentation-r)
-    - [2. Graph Construction (Python)](#2-graph-construction-python)
-    - [3. Model Inference (Python)](#3-model-inference-python)
-  - [Configuration Management & Change Detection](#configuration-management-change-detection)
+  - [Interactive Tutorial (recommended for first use)](#interactive-tutorial-recommended-for-first-use)
+  - [Command Line Interface (CLI)](#command-line-interface-cli)
+    - [Running with Docker or Singularity](#running-with-docker-or-singularity)
+    - [Step 1 — Trace Segmentation (R)](#step-1--trace-segmentation-r)
+    - [Step 2 — Graph Construction (Python)](#step-2--graph-construction-python)
+    - [Step 3 — Model Inference (Python)](#step-3--model-inference-python)
   - [Understanding the Output](#understanding-the-output)
 - [Training a Custom Model](#training-a-custom-model)
   - [Step 1: Generate Synthetic Training Data](#step-1-generate-synthetic-training-data)
   - [Step 2: Train MassGAT](#step-2-train-massgat)
-- [Performance & System Notes](#performance-system-notes)
+- [Performance & System Notes](#performance--system-notes)
 - [Citation](#citation)
 
-
+---
 
 ## Requirements
 
-Installing **MassGAT** can be done from a local environment or directly inside containers:
-- **Local:** [Pixi >= 0.73](https://pixi.prefix.dev/latest/) and on Windows: [Rtools](https://cran.r-project.org/bin/windows/Rtools/).
-- **Containers:** [Docker](https://docs.docker.com/) (Windows, Ubuntu) or [Apptainer](https://apptainer.org/) (Ubuntu).
+* **Running on a server / HPC:** Singularity or Apptainer.
+* **Running locally:** Miniforge or Miniconda, plus R.
+* **Hardware:** No GPU required for inference. MassGAT runs on CPU only (see [Performance & System Notes](#performance--system-notes) for expected runtimes). A GPU is optional and only speeds up training.
 
+---
 
 ## Installation
 
-First, clone this repository (eg.: using [git](https://git-scm.com/)):
-
+First, clone the repository:
 ```bash
 git clone https://github.com/odisce/MassGAT.git
 cd MassGAT
 ```
 
-### Local (Linux/MacOS/Windows)
+### Option A: Docker
 
-#### Set-up the environment
-
-| with Pixi   |  |
-| :-------- | :--------- |
-| to use cpu | `pixi shell -e cpu` |
-| to use gpu | `pixi shell -e gpu` |
-
-
-#### Install R dependencies :
+Build the Docker image locally from the provided `Dockerfile`:
 ```bash
-pixi run install-ionshed
+docker build -t odisce/massgat:latest environment/
 ```
+
+Alternatively, pull the pre-built image we publish on Docker Hub, so you don't have to build it yourself:
+```bash
+docker pull path/to/massgat:latest  # TODO: replace with real Docker Hub image once published
+```
+
+Either way, this is the simplest install option since R, Python, and all dependencies are already installed inside the image — skip straight to [Running with Docker or Singularity](#running-with-docker-or-singularity).
+
+
+
+### Option B: Local install (Linux/MacOS/Windows)
+
+Open the Miniforge/Miniconda terminal to run the setup. If you'd prefer to use the standard Windows terminal instead, first run the following inside the Miniforge/Miniconda terminal, then restart your terminal:
+```bash
+conda init cmd.exe
+```
+
+**1. Create and activate the environment:**
+```bash
+conda create --name massgat_env python=3.10 --channel conda-forge --override-channels -y
+conda activate massgat_env
+```
+
+**2. Install PyTorch & PyTorch Geometric:**
+
+For CPU-only, replace `cu118` with `cpu` in both commands below:
+```bash
+pip install torch==2.1.0 torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install torch-scatter torch-sparse torch-cluster -f https://data.pyg.org/whl/torch-2.1.0+cu118.html
+```
+
+**3. Install MassGAT and its Python dependencies:**
+```bash
+pip install -e .
+```
+
+**4. Install R dependencies (IonShed & XCMS):**
+```bash
+Rscript src/massgat/r_scripts/install_packages.R
+```
+
+✅ Once installed, pretrained model weights are already included in the repository at `weights/model_positive.pth` and `weights/model_negative.pth` (positive and negative ionization mode respectively). No separate download is needed to run inference — you only need to train your own weights if you want to customize the model (see [Training a Custom Model](#training-a-custom-model)).
+
+---
 
 ## Configuration
 
+MassGAT lets you tune the analytical pipeline without touching the source code, via the `config.yaml` file in the repository root. Key sections:
 
-MassGAT allows you to tune the analytical pipeline without modifying the source code via the config.yaml file located in the root directory. Key sections include:
+1. **`peak_picking`**: Standard LC-MS parameters (`ppm`, `rttol`) passed directly to the IonShed segmentation algorithm.
+2. **`graph`**: `rt_window` and `mz_tolerance`, which control how nodes are linked into candidate components.
+3. **`thresholds`**: Correlation thresholds (`isotope_corr`, `adduct_corr`) controlling how strict chemical edge assignment is. Lowering these yields denser graphs (more candidate edges kept).
 
-1. **Peak Picking (peak_picking):** Configure standard LC-MS parameters (ppm, rttol) passed directly to the [ionshed](https://github.com/odisce/ionshed) segmentation algorithm.
-2. **Graph (graph):** Adjust rt_window and mz_tolerance to define how nodes are linked geographically in the dataset.
-3. **Thresholds (thresholds):** Tune correlation thresholds (isotope_corr, adduct_corr) to make chemical edge assignments more or less strict. Lowering these will yield denser graphs.
+> **Note:** Command-line arguments passed to individual scripts (e.g. `--min_node_prob` in [Model Inference](#step-3--model-inference-python)) take precedence over the corresponding values in `config.yaml` for that run.
 
+### Chemical Rules & Mass Differences (`mass_differences.xlsx`)
 
+Beyond `config.yaml`, MassGAT relies on a customizable Excel file — `src/mass_differences.xlsx` — to define the chemical relationships it looks for. This file is used both for **synthetic data generation** and for **graph construction during inference**.
 
+To modify the default chemical rules, open `src/mass_differences.xlsx` and edit the relevant sheet:
+
+| Sheet | Purpose | Required columns |
+|---|---|---|
+| `isotopes` | Target isotopes (e.g., 13C, 15N). | `name`, `diff` (exact mass difference), `freq` (*Synthetic data generation only.*) |
+| `mods_positive` / `mods_negative` | Adducts and modifications per ionization mode. | `name`, `diff`, `freq`(*Synthetic data generation only.*) |
+| `dimers_positive` / `dimers_negative` | Possible dimer formations. | `name`, `diff`, `freq`(*Synthetic data generation only.*) |
+| `compat_positive` / `compat_negative` | Compatibility matrix — which modifications can chain together. *Synthetic data generation only.* | `source`, `target`, `weight` (chaining weight) |
+
+**Naming convention:** name adduct/modification rules with a `adduct_` or `loss_` prefix to ensure correct edge directionality.
+
+**Limits:**
+- Do **not** add new isotope or dimer links — the defaults are recommended as-is.
+- For adducts and fragments, keep the list to **20 rules maximum**.
+
+---
 
 ## Usage
 
-### Interactive Tutorial
+### Interactive Tutorial (recommended for first use)
 
-We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT pipeline ([ionshed](https://github.com/odisce/ionshed) segmentation, graph construction, inference, and component vizualization) on a test file.
-We provide an interactive tool using Jupyter Notebook to demonstrate the MassGAT pipeline ([ionshed](https://github.com/odisce/ionshed) segmentation, graph construction, inference, and component vizualization) on a test file.
+A Jupyter Notebook is provided to walk through the full pipeline (IonShed segmentation, graph construction, inference, and component visualization) on a test file.
 
-1. Create a directory in the `data` folder with your project name, create a `mzml` subdirectory, and place your .mzML (or .mzXML) files inside it. For testing, you can also use the provided test file in the `data/test` folder.
+1. Create a directory under `data/` named after your project, with an `mzml` subdirectory inside it, and place your `.mzML` (or `.mzXML`) files there. For a quick test, you can use the files already provided in `data/test`.
+2. Install the Jupyter integrations into `massgat_env`:
+   ```bash
+   conda install -c conda-forge jupyter rpy2 -y
+   ```
+3. Open `massgat.ipynb`, select the `massgat_env` kernel, and follow the instructions in each cell.
+4. Results are saved to the `results` subfolder of your project directory; tables and visualizations can also be explored directly inside the notebook.
 
-2. Install Jupyter integrations in `massgat_env`: ```bash conda install -c conda-forge jupyter rpy2 -y```
+### Command Line Interface (CLI)
 
-3. Open the `massgat.ipynb` notebook, select the `massgat_env` kernel, and follow the instructions in each cell to run the pipeline.
+For batch processing or execution on remote servers, run the three pipeline stages sequentially from the terminal.
 
-4. The results will be saved in the `results` subfolder of your project directory, and you can explore the output tables and visualizations directly in the notebook.
+#### Running with Docker or Singularity
 
+Use **Docker** on your own machine or a server. Use **Singularity/Apptainer** on shared HPC clusters, where Docker is disabled for security reasons.
 
+Commands are identical to the local ones below  — just add a prefix to run them inside the container, mounting your current folder.
 
-### Command Line Interface
+**Docker:**
+```bash
+docker run --gpus all -v $(pwd):/app -w /app massgat:latest <command>
+```
+*(Drop `--gpus all` if using CPU only.)*
 
-For batch processing or execution on remote servers, you can run the pipeline sequentially from the terminal.
+Example:
+```bash
+docker run --gpus all -v $(pwd):/app -w /app massgat:latest Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
+```
 
-**Data Preparation**
-A small example is provided in a project called `test` and can be run directly but if to use other files:
-- Replace `test` by your project name in all the following commands
-- First, set up your input directory by creating a folder named `data/test/mzml` in the root of your repository.
-- Place your LC-MS `.mzML` or `.mzXML` files (centroid mode) inside.
+**Singularity:**
+```bash
+singularity exec --nv /path/to/massgat.sif <command>
+```
+*(Drop `--nv` if using CPU only.)*
 
-The structure looks like this:
+Example:
+```bash
+singularity exec --nv /path/to/massgat.sif Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
+```
+
+The same prefix pattern applies to all three steps below.
+
+---
+
+#### Step 1 — Trace Segmentation (R)
+
+Set up your input directory first. Create `data/<project_name>/mzml/` and place your raw `.mzML`/`.mzXML` files inside:
 ```text
 MassGAT/
 └── data/
-    └── test/
+    └── project_name/
         └── mzml/
             ├── sample_01.mzML
             └── sample_02.mzML
 ```
 
-**1. Trace Segmentation (R)**
-Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format.
+Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format (replace `test` with your project folder path):
 ```bash
 Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
 ```
 
-**Configuration Change Detection:** If you modify parameters in `config.yaml` (e.g., `ppm`, `rttol`, `mz_res`, etc.), the script automatically detects the change and reprocesses files. To force reprocessing without changing config, use:
-```bash
-Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output --force
-```
+#### Step 2 — Graph Construction (Python)
 
-**2. Graph Construction (Python)**
-Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
+Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables:
 ```bash
 python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive
 ```
+Use `--ionization_mode negative` if your data was acquired in negative mode.
 
-**Configuration Change Detection:** If you modify graph parameters in `config.yaml` (e.g., `rt_window`, `mz_tolerance`, correlation thresholds), the script automatically detects and reprocesses. To force reprocessing without changing config:
-```bash
-python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive --force
-```
+#### Step 3 — Model Inference (Python)
 
-**3. Model Inference (Python)**
-Pass the constructed graphs through the trained MassGAT model. This step evaluates probabilities, groups peaks into chemical components, and optionally annotates them.
-The `--with_top_annotations` flag can be used to obtain the top 5 annotations for each component suggested by the annotation heuristic. By default, only peaks with a probability above 0.5 are kept, but you can adjust this threshold using the `--min_node_prob` argument.
+Pass the constructed graphs through the trained MassGAT model. This evaluates node/edge probabilities, groups peaks into chemical components, and (optionally) annotates them.
 
 ```bash
 python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
 ```
-
 
 Use `weights/model_negative.pth` for negative-mode data, matching the `--ionization_mode` used in Step 2.
 
 Key arguments:
 - `--min_node_prob`: probability threshold above which a peak is kept (default: `0.5`).
 - `--with_top_annotations`: also outputs the top 5 candidate annotations per component, as ranked by the annotation heuristic.
-
-### Configuration Management & Change Detection
-
-The pipeline automatically detects when parameters in `config.yaml` change, ensuring reproducibility:
-
-- **Trace Segmentation** tracks: `peak_picking` parameters (ppm, rttol, mz_res, rt_res, xic_rttol)
-- **Graph Construction** tracks: `graph` and `thresholds` sections (rt_window, mz_tolerance, correlation thresholds)
-- Config metadata is stored as hidden `.config_*.json` files in output directories
-
-**Behavior:**
-1. On first run or when config changes → files are reprocessed automatically
-2. If config remains unchanged → existing files are reused (skip processing)
-3. To force reprocessing without config changes, use `--force` flag
-
-This ensures that changing configuration parameters automatically triggers a rebuild, preventing issues where old parameter values would be silently reused with new settings.
-
 
 ### Understanding the Output
 
