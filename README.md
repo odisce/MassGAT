@@ -1,12 +1,8 @@
 # MassGAT
 
-**MassGAT** is a graph-based collective learning framework for the untargeted detection and annotation of LC-HRMS (Liquid Chromatography – High-Resolution Mass Spectrometry) data.
+**MassGAT** is a graph-based collective learning framework for untargeted detection and annotation of LC-HRMS data. By modeling LC-MS files as hierarchical graphs where nodes represent ion traces and edges represent chemical relationships (isotopes, adducts, dimers), MassGAT performs simultaneous peak detection and grouping, leveraging analytical redundancy to rescue valid, low-intensity signals.
 
-Instead of treating peak detection and annotation as two separate steps, MassGAT models each LC-MS file as a set of hierarchical graphs, where:
-- **nodes** are individual ion traces (segmented signal regions),
-- **edges** are candidate chemical relationships between them (isotopes, adducts, fragments, dimers).
 
-A Graph Attention Network (GAT) then jointly decides which nodes are true peaks and which edges are true chemical links, using the redundancy between related ion species to rescue valid but low-intensity signals that single-peak methods would discard.
 
 ![MassGAT Pipeline](docs/massgat_overview_horizontal.png)
 The pipeline runs in four stages — Trace Segmentation → Graph Construction → Model Inference → Annotation — matching the sections under [Usage](#usage) below.
@@ -19,77 +15,63 @@ The pipeline runs in four stages — Trace Segmentation → Graph Construction �
   - [Local (Linux/MacOS/Windows)](#local-linuxmacoswindows)
     - [Set-up the environment](#set-up-the-environment)
     - [Install R dependencies](#install-r-dependencies)
-  <!-- - [Containers (Docker / Apptainer)](#containers-docker--apptainer) -->
 - [Configuration](#configuration)
 - [Usage](#usage)
-  <!-- - [Interactive Tutorial](#interactive-tutorial) -->
-  - [Command Line Interface](#command-line-interface)
-    - [1. Trace Segmentation (R)](#1-trace-segmentation-r)
-    - [2. Graph Construction (Python)](#2-graph-construction-python)
-    - [3. Model Inference (Python)](#3-model-inference-python)
-  - [Configuration Management & Change Detection](#configuration-management-change-detection)
-  - [Understanding the Output](#understanding-the-output)
-- [Training a Custom Model](#training-a-custom-model)
-  - [Step 1: Generate Synthetic Training Data](#step-1-generate-synthetic-training-data)
-  - [Step 2: Train MassGAT](#step-2-train-massgat)
-- [Performance & System Notes](#performance-system-notes)
+  - [Prediction](#prediction)
+    - [Configuration Management & Change Detection](#configuration-management--change-detection)
+    - [Output](#understanding-the-output)
+  - [Training](#training-a-custom-model)
+    - [Step 1: Generate Synthetic Training Data](#step-1-generate-synthetic-training-data)
+    - [Step 2: Train MassGAT](#step-2-train-massgat)
+- [Performance & System Notes](#performance--system-notes)
 - [Citation](#citation)
 
 
+
 ## Requirements
+ 
+**MassGAT** can be run from a local environment or directly inside a container:
+- **Local:** [Pixi >= 0.73](https://pixi.prefix.dev/latest/) and on Windows: [Rtools](https://cran.r-project.org/bin/windows/Rtools/).
+- **Container:** [Docker](https://docs.docker.com/) (Windows, Ubuntu) or [Apptainer](https://apptainer.org/) (Ubuntu).
 
-Installing **MassGAT** currently requires a local environment:
-- [Pixi >= 0.73](https://pixi.prefix.dev/latest/), and on Windows: [Rtools](https://cran.r-project.org/bin/windows/Rtools/).
-
-<!-- Container installation (Docker / Apptainer) will be documented here once available. -->
 
 
-## Installation
-
-First, clone this repository (eg.: using [git](https://git-scm.com/)):
-
+## Local Installation
+ 
+First, clone this repository (e.g. using [git](https://git-scm.com/)):
 ```bash
 git clone https://github.com/odisce/MassGAT.git
 cd MassGAT
 ```
 
-### Local (Linux/MacOS/Windows)
 
-#### Set-up the environment
-
-| with Pixi   |  |
+### Set-up the environment
+ 
+| with Pixi | |
 | :-------- | :--------- |
-| to use cpu | `pixi shell -e cpu` |
-| to use gpu | `pixi shell -e gpu` |
-
-
-#### Install R dependencies :
+| to use cpu | `pixi shell -e cpu --locked` |
+| to use gpu | `pixi shell -e gpu --locked` |
+ 
+### Install R dependencies
+ 
 ```bash
 pixi run install-ionshed
 ```
 
+
 ## Configuration
-
-
-MassGAT allows you to tune the analytical pipeline without modifying the source code via the config.yaml file located in the root directory. Key sections include:
-
+ 
+MassGAT can be tuned without modifying the source code via [`config.yaml`](config.yaml). Key sections include:
+ 
 1. **Peak Picking (peak_picking):** Configure standard LC-MS parameters (ppm, rttol) passed directly to the [ionshed](https://github.com/odisce/ionshed) segmentation algorithm.
 2. **Graph (graph):** Adjust rt_window and mz_tolerance to define how nodes are linked geographically in the dataset.
 3. **Thresholds (thresholds):** Tune correlation thresholds (isotope_corr, adduct_corr) to make chemical edge assignments more or less strict. Lowering these will yield denser graphs.
 
-
+Both the trace segmentation and graph construction steps below detect when the relevant `config.yaml` parameters change and reprocess automatically; use the `--force` flag on either script to reprocess without a config change.
+ 
 
 
 ## Usage
-
-<!--
-### Interactive Tutorial
-(Notebook-based tutorial temporarily removed while under revision — CLI usage below is the supported path for now.)
--->
-
-### Command Line Interface
-
-For batch processing or execution on remote servers, you can run the pipeline sequentially from the terminal.
 
 **Data Preparation**
 A small example is provided in a project called `test` and can be run directly but if to use other files:
@@ -107,46 +89,46 @@ MassGAT/
             └── sample_02.mzML
 ```
 
-#### 1. Trace Segmentation (R)
-Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format.
-```bash
-Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
-```
+**Automatic Configuration Change Detection:**
+The trace segmentation and graph construction steps automatically detect when relevant `config.yaml` parameters change and reprocess files accordingly. To force reprocessing without changing config, use the `--force` flag on either script. See [Configuration Management & Change Detection](#configuration-management--change-detection) below for details on which parameters are tracked.
 
-**Configuration Change Detection:** If you modify parameters in `config.yaml` (e.g., `ppm`, `rttol`, `mz_res`, etc.), the script automatically detects the change and reprocesses files. To force reprocessing without changing config, use:
+### Prediction
+
+1. **Trace Segmentation (R)**: Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format.
+    ```bash
+    Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
+    ```
+To force reprocessing without changing config:
 ```bash
 Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output --force
 ```
 
-#### 2. Graph Construction (Python)
-Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
-```bash
-python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive
-```
+2. **Graph Construction (Python)**: Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
+    ```bash
+    python scripts/build_graphs.py --input_dir  data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive
+    ```
+    To force reprocessing without changing config:
+    ```bash
+    python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive --force
+    ```
 
-**Configuration Change Detection:** If you modify graph parameters in `config.yaml` (e.g., `rt_window`, `mz_tolerance`, correlation thresholds), the script automatically detects and reprocesses. To force reprocessing without changing config:
-```bash
-python scripts/build_graphs.py --input_dir data/test/ionshed_output --output_dir data/test/graphs --ionization_mode positive --force
-```
-
-#### 3. Model Inference (Python)
+3. **Model Inference (Python)**:
 Pass the constructed graphs through the trained MassGAT model. This step evaluates probabilities, groups peaks into chemical components, and optionally annotates them.
-The `--with_top_annotations` flag can be used to obtain the top 5 annotations for each component suggested by the annotation heuristic. By default, only peaks with a probability above 0.5 are kept, but you can adjust this threshold using the `--min_node_prob` argument.
 
-```bash
-python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
-```
-
+    The `--with_top_annotations` flag can be used to obtain the top 5 annotations for each component suggested by the annotation heuristic. By default, only peaks with a probability above 0.5 are kept, but you can adjust this threshold using the `--min_node_prob` argument.
+    ```bash
+    python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --model_type iterative --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
+    ```
 
 Use `weights/model_negative.pth` for negative-mode data, matching the `--ionization_mode` used in Step 2.
 
-**For interactive visualization:** To run the `visualization.ipynb` notebook in `docs/`, install `ipywidgets`, `networkx`, and `jupyter`.
+**For interactive visualization:** Once the results have been obtained by CLI, you can navigate through the results. To run the `visualization.ipynb` notebook in `docs/`, install `ipywidgets`, `networkx`, and `jupyter`.
 
 Key arguments:
 - `--min_node_prob`: probability threshold above which a peak is kept (default: `0.5`).
 - `--with_top_annotations`: also outputs the top 5 candidate annotations per component, as ranked by the annotation heuristic.
 
-### Configuration Management & Change Detection
+#### Configuration Management & Change Detection
 
 The pipeline automatically detects when parameters in `config.yaml` change, ensuring reproducibility:
 
@@ -161,20 +143,17 @@ The pipeline automatically detects when parameters in `config.yaml` change, ensu
 
 This ensures that changing configuration parameters automatically triggers a rebuild, preventing issues where old parameter values would be silently reused with new settings.
 
-
-### Understanding the Output
+#### Output
 
 Results are written to the `--output_dir` you specified (e.g. `data/test/results`). This includes:
 - **A final peak list** with detection probabilities and, if `--with_top_annotations` was used, the top-ranked candidate annotations per component (main ion, isotopes, adducts, losses, dimers) and the estimated neutral mass.
 - **Pseudo-spectra visualizations** — per-component views of validated ion species (m/z vs. intensity) alongside their elution profiles.
 
----
-
-## Training a Custom Model
+### Training
 
 To retrain MassGAT on custom or synthetic data, first generate synthetic training data, then run the training script.
 
-### Step 1: Generate Synthetic Training Data
+#### Step 1: Generate Synthetic Training Data
 
 Generate synthetic components for each family type:
 ```bash
@@ -196,7 +175,7 @@ python scripts/demo_generate_graphs.py --family <FAMILY_TYPE> --num <NUM_SAMPLES
 python scripts/demo_generate_graphs.py --family true_with_noise --num 10000 --out synthetic_dataset/true_with_noise --mode positive --seed 42
 ```
 
-### Step 2: Train MassGAT
+#### Step 2: Train MassGAT
 
 Basic training with default hyperparameters:
 ```bash
@@ -222,11 +201,10 @@ Trained weights are saved to the `weights/` directory, named after the ionizatio
 
 **Tracking experiments with MLflow:**
 ```bash
-mlflow ui
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
 ```
-Then open `http://localhost:5000` in your browser to view training metrics and compare runs.
 
----
+Then open `http://localhost:5001` in your browser to view training metrics and compare runs.
 
 ## Performance & System Notes
 
