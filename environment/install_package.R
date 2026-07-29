@@ -23,9 +23,6 @@ if (.Platform$OS.type == "windows") {
   pak::pkg_install("odisce/ionshed@v1.0.1", dependencies = TRUE)
 }
 
-<<<<<<< HEAD
-if (require("ionshed")) {message("ionshed installed")}
-=======
 if (require("ionshed")) {message("ionshed installed")}
 
->>>>>>> gitlab/test-session
+
