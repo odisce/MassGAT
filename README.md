@@ -59,6 +59,7 @@ pixi run install-ionshed
 ## Usage
 
 **Data Preparation**
+
 A small example is provided in a project called `test` and can be run directly but if to use other files:
 - Replace `test` by your project name in all the following commands
 - First, set up your input directory by creating a folder named `data/test/mzml` in the root of your repository.
@@ -75,16 +76,16 @@ MassGAT/
 ```
 
 **Automatic Configuration Change Detection:**
+
 The trace segmentation and graph construction steps automatically detect when relevant [`config.yaml`](config.yaml) parameters change and reprocess files accordingly. To force reprocessing without changing config, use the `--force` flag on either script. See [Configuration Management & Change Detection](#configuration-management--change-detection) below for details on which parameters are tracked.
 
-### Prediction
 
+### Prediction
 
 1. **Trace Segmentation (R)**: Run the IonShed script to extract peaks and Region of Interest (ROI) signals into `.feather` format.
     ```bash
     Rscript scripts/ionshed_batch_processing.R data/test/mzml data/test/ionshed_output
     ```
-
 
 2. **Graph Construction (Python)**: Build PyTorch Geometric graphs (`.pt`) from the extracted `.feather` tables.
     ```bash
@@ -109,7 +110,7 @@ The trace segmentation and graph construction steps automatically detect when re
 
 
 > **Note**
-> **For interactive visualization:** Once the results have been obtained by CLI, you can navigate through the results. To run the `visualization.ipynb` notebook in `docs/`, install `ipywidgets`, `networkx`, and `jupyter`.
+> **For interactive visualization:** Once the results have been obtained by CLI, you can navigate through the results. To run the `visualization.ipynb` notebook in `docs/`. Select the (cpu or gpu) python Kernel, if modified, update the project name in `os.environ["PROJ_NAME"] = "test"` and run the notebook.
 
 
 
