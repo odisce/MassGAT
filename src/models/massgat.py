@@ -46,7 +46,7 @@ class ProfileTransformerEncoder(nn.Module):
             dropout=dropout_seq,
             norm_first=True
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers, enable_nested_tensor=False)
         self.attention_pool = nn.Linear(d_model, 1)
 
     def forward(self, x_intensity, x_time):

@@ -384,7 +384,7 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, ha
     config.configure_for_mode(ionization_mode)
     
     if show_progress:
-        print(f"Mode d'ionisation détecté: {ionization_mode}")
+        print(f"Detected ionization mode: {ionization_mode}")
     
     # Filter peaks by RT window if specified
     if rt_window is not None:

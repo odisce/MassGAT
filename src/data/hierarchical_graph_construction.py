@@ -406,7 +406,7 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt
         config.configure_for_mode(ionization_mode)
     
     if show_progress:
-        print(f"Mode d'ionisation détecté: {ionization_mode}")
+        print(f"Detected ionization mode: {ionization_mode}")
 
     # Filter peaks that have less than MIN_SIGNALS in their signal clusters
     if "sc_length" in peaks_df.columns:

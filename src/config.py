@@ -210,14 +210,11 @@ def configure_for_mode(mode):
     else:
         raise ValueError(f"Unknown ionization mode: {mode}")
     
-    #print(f"Configuration applied for mode {mode}:")
-    #print(f"  - Adducts: {len(ADDUCT_DIFFS)} types")
-    #print(f"  - Dimers: {len(DIMER_DIFFS)} types")
 
 
 
 if __name__ == '__main__':
     configure_for_mode('positive')
-    print(f"Mass differences configurées: {MASS_DIFFS}")
-    print(f"Adduct differences configurées: {ADDUCT_DIFFS}")
-    print(f"Dimer differences configurées: {DIMER_DIFFS}")
+    print(f"Configured mass differences: {MASS_DIFFS}")
+    print(f"Configured adduct differences: {ADDUCT_DIFFS}")
+    print(f"Configured dimer differences: {DIMER_DIFFS}")
