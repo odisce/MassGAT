@@ -339,9 +339,9 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
     
     # Establish known multicharged pairs dynamically based on polarity
     if charge == '+':
-        known_multicharged_pairs = ["2M", "2M+H", "2M+Na", "2M+NH4"]
+        known_multicharged_pairs = ["2M+H", "2M+Na", "2M+NH4"]
     else:
-        known_multicharged_pairs = ["2M-H", "2M+H", "2M+HCOO", "2M+Cl"]
+        known_multicharged_pairs = ["2M-H", "2M+HCOO", "2M+Cl"]
     
     node_state = {
         candidate_gidx: (dict(base_delta), False, 'M', [base_mod_str], [], charge)
@@ -383,9 +383,7 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                     custom_charge = "2+" if charge == "+" else "2-"
                     custom_mods = list(cur_mods) + [base_mod_str] 
                     
-                    # --- CHEMISTRY RULE ---
-                    # Reversing the algorithm's dimer math (mz_heavy = 2*(mz_light - base) + dimer_adduct)
-                    # to deduce the exact neutral loss that occurred on the z=2 node.
+                    # Reversing the algorithm's dimer computation (mz_heavy = 2*(mz_light - base) + dimer_adduct)
                     if charge == "+":
                         if chem_part == "2M+NH4":
                             custom_mods.append("-NH3")
@@ -416,8 +414,19 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                 else:
                     d_base, d_mod = '2M', ''
                 
-                mod_list = [format_chem_part(d_mod, True)] if d_mod else []
-                node_state[other] = (child_atoms, True, d_base, mod_list, list(cur_isos), charge)
+                # --- NEW TRUE DIMER STRING ALGEBRA ---
+                # 1. Reverse the base ionizing atom (e.g., +H becomes -H)
+                rev_base = format_chem_part(base_mod_str, False)
+                
+                # 2. Duplicate parent mods, subtract ionizing atom twice, add the dimer adduct (X)
+                mod_list = list(cur_mods) + list(cur_mods) + [rev_base, rev_base]
+                if d_mod:
+                    mod_list.append(format_chem_part(d_mod, True))
+                    
+                # 3. Double the isotopes (if a 13C molecule dimerizes, it has two 13C atoms)
+                new_isos = list(cur_isos) + list(cur_isos)
+                
+                node_state[other] = (child_atoms, True, d_base, mod_list, new_isos, charge)
                 visited.add(other)
                 queue.append(other)
 

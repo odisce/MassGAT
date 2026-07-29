@@ -49,27 +49,32 @@ EDGE_TYPE_NAMES_NEGATIVE = build_edge_names({
 EDGE_COLORS = {
     'isotope': '#4CAF50',      # green
     'adduct': '#2196F3',       # blue
-    'loss': "#2E15EA",         # red
-    'mod': '#2E15EA',          # purple
+    'loss': "#2E15EA",         # dark blue
+    'mod': "#644204",          # brown
     'dimer': '#FF9800',          # orange
     'unknown': '#9E9E9E'       # gray
 }
-def get_edge_category(edge_type):
+def get_edge_category(edge_type, edge_names=None):
     """Categorize edge type for coloring."""
-    if 0 <= edge_type <= 4: return 'isotope'
-    if 11 <= edge_type <= 30:
-        name = EDGE_TYPE_NAMES_POSITIVE.get(edge_type, '')
-        if 'adduct' in name: return 'adduct'
-        if 'mod' in name: return 'mod'
-        if 'loss' in name: return 'loss'
-        return 'adduct'  # fallback
-    if 31 <= edge_type <= 33: return 'dimer'
+    if edge_names is None:
+        edge_names = EDGE_TYPE_NAMES_POSITIVE
+        
+    name = edge_names.get(edge_type, '')
+    
+    if 'adduct' in name: return 'adduct'
+    if 'mod' in name: return 'mod'
+    if 'loss' in name: return 'loss'
+    if 'isotope' in name or (0 <= edge_type <= 4): return 'isotope'
+    if 'dimer' in name or (31 <= edge_type <= 33): return 'dimer'
+    
+    # Fallback to adduct if name is missing but we know the range
+    if 11 <= edge_type <= 30: return 'adduct'
+    
     return 'unknown'
 
-def get_edge_color(edge_type):
+def get_edge_color(edge_type, edge_names=None):
     """Get color for an edge type."""
-    return EDGE_COLORS.get(get_edge_category(edge_type), '#888')
-
+    return EDGE_COLORS.get(get_edge_category(edge_type, edge_names), '#888')
 def short_label(edge_name):
     """Strip prefix for compact display."""
     prefixes = ['isotope_', 'adduct_', 'mod_', 'loss_', 'dimer_']
@@ -78,21 +83,40 @@ def short_label(edge_name):
             return edge_name[len(prefix):]
     return edge_name[:6]
 
-def get_multicharged_labels(u, v, G, edge_type, edge_names):
-    """Helper to dynamically rename multicharged edges."""
+
+def get_multicharged_labels(u, v, G, edge_type, edge_names, annotation_results=None, root_idx=None):
+    """Helper to dynamically rename multicharged edges ONLY if verified by the active root's annotations."""
     edge_name = edge_names.get(edge_type, f'unknown_{edge_type}')
     cat = get_edge_category(edge_type)
     short = short_label(edge_name)
     
-    # Our universal list of multicharged pairs
-    multi_pairs = ["2M", "2M+H", "2M+Na", "2M+NH4", "2M-H", "2M+HCOO", "2M+Cl"]
-    
-    if cat == 'dimer' and short in multi_pairs:
-        # You can change these strings to whatever you prefer!
-        new_short = "Doubly charged"
-        new_hover = f"<b>Doubly charged </b><br><i>Algorithm originally matched: {edge_name}</i>"
-        return new_short, new_hover
+    if cat == 'dimer':
+        is_multicharged = False
         
+        if annotation_results and len(annotation_results) > 0:
+            lighter_node = u if G.nodes[u]['mz'] < G.nodes[v]['mz'] else v
+            lighter_roi = G.nodes[lighter_node]['roi']
+            
+            # 1. Determine which annotation context to trust
+            target_res = annotation_results[0] # Default to the top-scoring candidate
+            if root_idx is not None:
+                for res in annotation_results:
+                    if res['candidate_gidx'] == root_idx or res['candidate_roi'] == root_idx:
+                        target_res = res
+                        break
+                        
+            # 2. Check if the lighter node is doubly charged in THIS specific context
+            annots = target_res.get('node_annotations', {})
+            light_ann = annots.get(lighter_roi, "")
+            
+            if "]2+" in light_ann or "]2-" in light_ann:
+                is_multicharged = True
+
+        if is_multicharged:
+            new_short = "Doubly charged"
+            new_hover = f"<b>Doubly charged </b><br><i>Algorithm originally matched: {edge_name}</i>"
+            return new_short, new_hover
+            
     return short, f"{edge_name} (type {edge_type})"
 
 def create_nx_graph(graph, ionization_mode='positive', node_probs=None, 
@@ -323,8 +347,8 @@ def save_static(G, subgraph, nodes, pos, low_prob_nodes, node_data,
                 layout, intensities_are_log, title, edge_names,
                 use_prob_styling, low_prob_opacity, prob_colorscale,
                 highlight_color, normal_color, node_size, edge_width,
-                filepath, style='article', xlim=None, 
-                root_idx=None, coherent_nodes=None, incoherent_alpha=0.2):
+                filepath, style='article', xlim=None, ylim=None,
+                root_idx=None, coherent_nodes=None, incoherent_alpha=0.2, annotation_results=None):
     """Save figure as PDF/PNG/SVG, with support for directional coherence fading."""
     
     cfg = style_config(style)
@@ -341,7 +365,7 @@ def save_static(G, subgraph, nodes, pos, low_prob_nodes, node_data,
         ax.set_yticklabels([])
     
     for u, v, data in subgraph.edges(data=True):
-        color = get_edge_color(data['type'])
+        color = get_edge_color(data['type'], edge_names)
         
         is_incoherent = coherent_nodes and (u not in coherent_nodes or v not in coherent_nodes)
         if is_incoherent:
@@ -393,8 +417,8 @@ def save_static(G, subgraph, nodes, pos, low_prob_nodes, node_data,
         if coherent_nodes and (u not in coherent_nodes or v not in coherent_nodes):
             continue
             
-        short, _ = get_multicharged_labels(u, v, G, data['type'], edge_names)
-        color = get_edge_color(data['type'])
+        short, _ = get_multicharged_labels(u, v, G, data['type'], edge_names, annotation_results, root_idx)
+        color = get_edge_color(data['type'], edge_names)
         is_low = use_prob_styling and (u in low_prob_nodes or v in low_prob_nodes)
         
         ax.text(
@@ -426,6 +450,9 @@ def save_static(G, subgraph, nodes, pos, low_prob_nodes, node_data,
     if layout == 'spatial' and xlim:
         margin = (xlim[1] - xlim[0]) * 0.05
         ax.set_xlim(xlim[0] - margin, xlim[1] + margin)
+        
+    if layout == 'spatial' and ylim:
+        ax.set_ylim(ylim[0] * 0.5, ylim[1] * 2.0)
     
     ax.grid(True, lw=0.3, alpha=0.4)
     ax.spines[['top','right']].set_visible(False)
@@ -442,8 +469,8 @@ def save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data,
                          use_prob_styling, low_prob_opacity, prob_colorscale,
                          highlight_color, normal_color, node_size, edge_width,
                          filepath, profiles, nodes_to_plot, style='article', 
-                         xlim=None, highlight_nodes=None,
-                         root_idx=None, coherent_nodes=None, incoherent_alpha=0.2):
+                         xlim=None, ylim=None, profile_ylim=None, highlight_nodes=None,
+                         root_idx=None, coherent_nodes=None, incoherent_alpha=0.2, annotation_results=None):
     """Save a combined publication-ready static figure (Graph + Profiles)."""
     
     cfg = style_config(style)
@@ -466,7 +493,7 @@ def save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data,
         ax1.set_yticks([])
 
     for u, v, data in subgraph.edges(data=True):
-        color = get_edge_color(data['type'])
+        color = get_edge_color(data['type'], edge_names)
         
         is_incoherent = coherent_nodes and (u not in coherent_nodes or v not in coherent_nodes)
         if is_incoherent:
@@ -524,9 +551,9 @@ def save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data,
     for u, v, data, mx, my in labels:
         if coherent_nodes and (u not in coherent_nodes or v not in coherent_nodes):
             continue
-            
-        short, _ = get_multicharged_labels(u, v, G, data['type'], edge_names)
-        color = get_edge_color(data['type'])
+
+        short, _ = get_multicharged_labels(u, v, G, data['type'], edge_names, annotation_results, root_idx)
+        color = get_edge_color(data['type'], edge_names)
         is_low = use_prob_styling and (u in low_prob_nodes or v in low_prob_nodes)
         
         ax1.text(
@@ -551,6 +578,9 @@ def save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data,
     if layout == 'spatial' and xlim:
         margin = (xlim[1] - xlim[0]) * 0.05
         ax1.set_xlim(xlim[0] - margin, xlim[1] + margin)
+        
+    if layout == 'spatial' and ylim:
+        ax1.set_ylim(ylim[0] * 0.5, ylim[1] * 2.0)
         
     ax1.grid(True, lw=0.3, alpha=0.4)
     ax1.spines[['top','right']].set_visible(False)
@@ -594,13 +624,13 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                        normal_color='#484C48', highlight_color='#800080', node_size=24, 
                        edge_width=2, show_legend=True, intensities_are_log=False, 
                        prob_colorscale='RdYlGn', show_colorbar=True, show=True, 
-                       style='article', xlim=None, node_features=None, show_profiles=False, 
+                       style='article', xlim=None, ylim=None, node_features=None, show_profiles=False, 
                        annotation_results=None, root_node=None, fade_incoherent=True,
-                       graph=None, remove_low_prob=False):
+                       graph=None, remove_low_prob=False, full_graph_axes=True):
     """Interactive Plotly visualization with robust toggleable directional fading and profile swapping."""
     import json
     
-    # dynamic graph
+    # --- DYNAMIC GRAPH PROCESSING ---
     if graph is not None:
         if node_features is None and 'node_features' in graph:
             node_features = graph['node_features'].numpy()
@@ -631,7 +661,7 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
         
     nodes = list(nodes)
 
-    # remove low probability nodes if requested
+    # --- REMOVE LOW PROBABILITY NODES ENTIRELY ---
     if remove_low_prob and node_probs is not None:
         valid_nodes = []
         for n in nodes:
@@ -655,6 +685,17 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
     else:
         pos = nx.circular_layout(subgraph)
 
+    if layout == 'spatial' and full_graph_axes:
+        all_x = [pos[n][0] for n in nodes]
+        all_y = [pos[n][1] for n in nodes]
+        if all_x and all_y:
+            if xlim is None: 
+                x_min, x_max = min(all_x), max(all_x)
+                x_margin = (x_max - x_min) * 0.08 if x_max > x_min else 10
+                xlim = (x_min - x_margin, x_max + x_margin)
+            if ylim is None: 
+                ylim = (min(all_y), max(all_y))
+                
     root_idx = None
     coherent_nodes = None
     incoherent_alpha = 0.2 if fade_incoherent else 0.0
@@ -710,12 +751,12 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
         hover_text.append(hover_info)
 
     edges_by_category = {}
-    mid_x_list, mid_y_list, mid_hover_text = [], [], []
+    mid_x_list, mid_y_list, mid_hover_text, mid_customdata = [], [], [], []
     
     for u, v, data in subgraph.edges(data=True):
         edge_type = data['type']
         edge_name = edge_names.get(edge_type, f'unknown_{edge_type}')
-        category = get_edge_category(edge_type)
+        category = get_edge_category(edge_type, edge_names)
         
         if category not in edges_by_category:
             edges_by_category[category] = {'normal': {'x': [], 'y': []}, 'shadow': {'x': [], 'y': []}}
@@ -732,12 +773,13 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
         mid_x_list.append(mx)
         mid_y_list.append(my)
         
-        short, hover_str = get_multicharged_labels(u, v, G, edge_type, edge_names)
+        short, hover_str = get_multicharged_labels(u, v, G, edge_type, edge_names, annotation_results, root_idx)
         cosine_sim = data.get('cosine_similarity')
         if cosine_sim is not None:
             hover_str += f"<br>Cosine Similarity: {cosine_sim:.4f}"
         if is_shadow: hover_str += "<br><i>(Low Prob/Incoherent)</i>"
         mid_hover_text.append(hover_str)
+        mid_customdata.append([str(int(u)), str(int(v))])
 
     edge_traces = []
     for category, subtypes in edges_by_category.items():
@@ -760,8 +802,15 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
             mode='lines', hoverinfo='skip', 
             name=f'{category.title()} (fade)', opacity=incoherent_alpha, showlegend=False
         ))
-    edge_hover_trace = go.Scatter(x=mid_x_list, y=mid_y_list, mode='markers', marker=dict(size=20, color='rgba(0,0,0,0)'), hovertext=mid_hover_text, hovertemplate='%{hovertext}<extra></extra>', showlegend=False)
-
+    edge_hover_trace = go.Scatter(
+        x=mid_x_list, y=mid_y_list, mode='markers', 
+        marker=dict(size=20, color='rgba(0,0,0,0)'), 
+        hovertext=mid_hover_text, 
+        customdata=mid_customdata,                     
+        hovertemplate='%{hovertext}<extra></extra>', 
+        showlegend=False, 
+        name='EdgeHover'                               
+    )
     node_traces = []
     
     opacities = [incoherent_alpha if (coherent_nodes and n not in coherent_nodes) else 1.0 for n in nodes]
@@ -809,7 +858,18 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
 
         if static_combined_filepath:
             nodes_to_plot = list(profiles.keys())
-            save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data, layout, intensities_are_log, title, edge_names, use_prob_styling, low_prob_opacity, prob_colorscale, highlight_color, normal_color, node_size, edge_width, static_combined_filepath, profiles, nodes_to_plot, style, xlim, highlight_nodes, root_idx, coherent_nodes, incoherent_alpha)
+            save_static_combined(
+                G, subgraph, nodes, pos, low_prob_nodes, node_data, layout, intensities_are_log, title,
+                edge_names, use_prob_styling, low_prob_opacity, prob_colorscale, highlight_color, normal_color, 
+                node_size, edge_width, static_combined_filepath, profiles, nodes_to_plot, 
+                style=style, 
+                xlim=xlim, 
+                highlight_nodes=highlight_nodes, 
+                root_idx=root_idx, 
+                coherent_nodes=coherent_nodes, 
+                incoherent_alpha=incoherent_alpha, 
+                annotation_results=annotation_results
+            )
 
         fig = make_subplots(rows=1, cols=2, column_widths=[0.65, 0.35], subplot_titles=('Pseudospectrum', 'Elution Profiles'), horizontal_spacing=0.04)
         for trace in graph_traces: fig.add_trace(trace, row=1, col=1)
@@ -825,7 +885,7 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
     if show_edge_labels:
         for u, v, data in subgraph.edges(data=True):
             if coherent_nodes and (u not in coherent_nodes or v not in coherent_nodes): continue
-            short, _ = get_multicharged_labels(u, v, G, data['type'], edge_names)
+            short, _ = get_multicharged_labels(u, v, G, data['type'], edge_names, annotation_results, root_idx)
             mx, my = get_midpoint(pos, u, v, layout, intensities_are_log)
             is_low = use_prob_styling and (u in low_prob_nodes or v in low_prob_nodes)
             fig.add_annotation(x=mx, y=my, text=short, showarrow=False, visible=True, font=dict(size=11, color='black'), bgcolor='rgba(255,255,255,0.85)', opacity=0.4 if is_low else 1.0, bordercolor='gray', borderwidth=0.8, borderpad=2)
@@ -850,7 +910,7 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
             js_edges.append({
                 'u': str(int(u)), 
                 'v': str(int(v)), 
-                'cat': get_edge_category(d['type']).title(),
+                'cat': get_edge_category(d['type'], edge_names).title(), # <--- Passed edge_names here
                 'cosine_sim': float(d.get('cosine_similarity', 0)) if d.get('cosine_similarity') is not None else None,
                 'x': [float(pos[u][0]), float(pos[v][0]), None], 
                 'y': [float(pos[u][1]), float(pos[v][1]), None]
@@ -868,6 +928,17 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
         var lowProbNodes = new Set({json.dumps(js_low_prob)});
         var fallbackRootId = "{str(root_idx) if root_idx is not None else ''}";
         var isNormalized = false;
+        
+        // --- NEW: Map network paths for dynamic edge cutting ---
+        var adj = {{}};
+        allEdges.forEach(e => {{
+            if (!adj[e.u]) adj[e.u] = [];
+            if (!adj[e.v]) adj[e.v] = [];
+            adj[e.u].push(e.v);
+            adj[e.v].push(e.u);
+        }});
+        var cutEdges = new Set();
+        // ------------------------------------------------------
         
         setTimeout(function() {{
             var graphDiv = document.getElementsByClassName('plotly-graph-div')[0];
@@ -892,7 +963,7 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                 controlContent.appendChild(candSelect);
             }}
 
-            controlContent.innerHTML += '<div style="margin-bottom:10px;"><input type="checkbox" id="incoherentToggle" ' + ({incoherent_alpha} > 0 ? 'checked' : '') + '><label for="incoherentToggle" style="font-size:12px;margin-left:5px;">Show All Nodes</label></div>';
+            controlContent.innerHTML += '<div style="margin-bottom:10px;"><input type="checkbox" id="incoherentToggle" ' + ({incoherent_alpha} > 0 ? 'checked' : '') + '><label for="incoherentToggle" style="font-size:12px;margin-left:5px;">Show Incoherent Nodes</label></div>';
 
             controlContent.innerHTML += '<label style="font-size:12px;display:block;margin-bottom:3px;">Profiles Intensity:</label>';
             var intSelect = document.createElement('select');
@@ -923,18 +994,48 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                 
                 if (!trace._origX) trace._origX = trace.x.slice();
                 if (!trace._origY) trace._origY = trace.y.slice();
+                if (!trace._origHover) trace._origHover = trace.hovertext.slice(); 
                 
-                var cNodes = null;
+                // 1. Identify the base "valid" nodes computed by Python
+                var baseNodes = null;
                 var cDataAnnots = null;
                 
                 if (rootId) {{
                     if (candData[rootId]) {{
-                        cNodes = new Set(candData[rootId].nodes.map(String));
+                        baseNodes = new Set(candData[rootId].nodes.map(String));
                         cDataAnnots = candData[rootId].annots;
                     }} else if (rootId === fallbackRootId && staticCoherentNodes.size > 0) {{
-                        cNodes = staticCoherentNodes;
+                        baseNodes = staticCoherentNodes;
                     }} else {{
-                        cNodes = new Set([rootId]); 
+                        baseNodes = new Set([rootId]); 
+                    }}
+                }}
+
+                // 2. DYNAMIC BFS: Recalculate Coherent Nodes taking Cut Edges into account
+                var cNodes = null;
+                if (baseNodes) {{
+                    cNodes = new Set();
+                    if (baseNodes.has(rootId)) {{
+                        var queue = [rootId];
+                        cNodes.add(rootId);
+                        
+                        while(queue.length > 0) {{
+                            var curr = queue.shift();
+                            if (adj[curr]) {{
+                                adj[curr].forEach(neighbor => {{
+                                    var edgeKey1 = curr + "_" + neighbor;
+                                    var edgeKey2 = neighbor + "_" + curr;
+                                    
+                                    // If the edge isn't cut, and the neighbor was originally valid...
+                                    if (!cutEdges.has(edgeKey1) && !cutEdges.has(edgeKey2)) {{
+                                        if (baseNodes.has(neighbor) && !cNodes.has(neighbor)) {{
+                                            cNodes.add(neighbor);
+                                            queue.push(neighbor); // Traverse deeper
+                                        }}
+                                    }}
+                                }});
+                            }}
+                        }}
                     }}
                 }}
                 
@@ -948,7 +1049,7 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                     newSymbols.push(isRoot ? 'star' : 'circle');
                     newSizes.push(isRoot ? {node_size * 1.5} : {node_size});
                     
-                    var hoverStr = trace.hovertext && trace.hovertext[i] ? String(trace.hovertext[i]) : '';
+                    var hoverStr = trace._origHover && trace._origHover[i] ? String(trace._origHover[i]) : '';
                     var baseHover = hoverStr.split('<br><b>Annotation:')[0];
                     var isLow = lowProbNodes.has(n);
                     
@@ -966,21 +1067,16 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                             newTextColors.push('rgba(0,0,0,1)');
                             var ann = cDataAnnots && cDataAnnots[n] ? cDataAnnots[n] : null;
                             newHover.push(ann ? baseHover + '<br><b>Annotation: ' + ann + '</b>' : baseHover);
-                        }} else {{
-                            if (showIncoherent) {{
-                                newX.push(trace._origX[i]);
-                                newY.push(trace._origY[i]);
-                                // ONLY alter opacity. Do not push new colors. 
-                                // This preserves the WebGL colorscale so the node stays the correct mapped color.
-                                newOpacities.push(0.15); 
-                                newTextColors.push('rgba(0,0,0,0)');
-                                newHover.push(baseHover);
                             }} else {{
-                                newX.push(null);
-                                newY.push(null);
-                                newOpacities.push(0);
-                                newTextColors.push('rgba(0,0,0,0)');
-                                newHover.push('');
+                            newX.push(trace._origX[i]);
+                            newY.push(trace._origY[i]);
+                            newTextColors.push('rgba(0,0,0,0)');
+                            newHover.push(baseHover); 
+                            
+                            if (showIncoherent) {{
+                                newOpacities.push(0.15); 
+                            }} else {{
+                                newOpacities.push(0.01);
                             }}
                         }}
                     }}
@@ -1000,6 +1096,13 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                 allEdges.forEach(edge => {{
                     if (!edgeUpdates[edge.cat]) edgeUpdates[edge.cat] = {{ activeX: [], activeY: [], shadowX: [], shadowY: [] }};
                     
+                    var edgeKey = String(edge.u) + "_" + String(edge.v);
+                    var edgeKeyRev = String(edge.v) + "_" + String(edge.u);
+                    var isCut = cutEdges.has(edgeKey) || cutEdges.has(edgeKeyRev);
+                    
+                    // If the edge is cut by the user, we completely drop it from both active and shadow coordinates
+                    if (isCut) return; 
+
                     var isLowProbEdge = lowProbNodes.has(String(edge.u)) || lowProbNodes.has(String(edge.v));
                     var isCoherentEdge = !cNodes || (cNodes.has(String(edge.u)) && cNodes.has(String(edge.v)));
                     
@@ -1017,6 +1120,28 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                         }}
                     }}
                 }});
+                
+                // 3. Update the Edge Hover Texts to display "[CUT]" instructions
+                var edgeHoverTraceIdx = graphDiv.data.findIndex(t => t.name === 'EdgeHover');
+                if (edgeHoverTraceIdx !== -1) {{
+                    var hoverTrace = graphDiv.data[edgeHoverTraceIdx];
+                    if (!hoverTrace._origHover) hoverTrace._origHover = hoverTrace.hovertext.slice();
+                    
+                    var newEdgeHover = [];
+                    for(var i=0; i<hoverTrace.customdata.length; i++) {{
+                        var u = String(hoverTrace.customdata[i][0]);
+                        var v = String(hoverTrace.customdata[i][1]);
+                        var isCut = cutEdges.has(u+"_"+v) || cutEdges.has(v+"_"+u);
+                        var text = hoverTrace._origHover[i];
+                        
+                        if (isCut) {{
+                            newEdgeHover.push("<b><span style='color:red;'>[CUT]</span></b> " + text + "<br><i>Click to restore</i>");
+                        }} else {{
+                            newEdgeHover.push(text + "<br><i>Click to cut edge</i>");
+                        }}
+                    }}
+                    Plotly.restyle(graphDiv, {{'hovertext': [newEdgeHover]}}, [edgeHoverTraceIdx]);
+                }}
                 
                 var traceIndices = [];
                 var traceUpdatesX = [];
@@ -1099,10 +1224,32 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
                 }});
             }}
 
+            // --- PLOTLY CLICK EVENT LISTENER ---
             graphDiv.on('plotly_click', function(evt) {{
                 var pt = evt.points[0];
-                if (pt.curveNumber === undefined || pt.customdata === undefined) return;
+                if (pt.curveNumber === undefined) return;
                 
+                var traceName = evt.points[0].data.name;
+                
+                // 1. Check if the user clicked an Edge Midpoint
+                if (traceName === 'EdgeHover' && pt.customdata !== undefined) {{
+                    var u = String(pt.customdata[0]);
+                    var v = String(pt.customdata[1]);
+                    var edgeKey = u + "_" + v;
+                    
+                    if (cutEdges.has(edgeKey)) {{
+                        cutEdges.delete(edgeKey);
+                        cutEdges.delete(v + "_" + u); // Ensure reverse is deleted
+                    }} else {{
+                        cutEdges.add(edgeKey);
+                    }}
+                    
+                    updateGraphState(); // Instantly update propagation & visibility!
+                    return; // Exit early, do not trigger node profile logic
+                }}
+                
+                // 2. Otherwise, treat as a Node click (load elution profiles)
+                if (pt.customdata === undefined) return;
                 var nId = String(pt.customdata);
                 if (Array.isArray(pt.customdata)) nId = String(pt.customdata[0]);
                 
@@ -1125,11 +1272,34 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
             updateGraphState();
         }}, 500);
         """
-        fig.write_html(save_html, post_script=post_js)
+        # Upgrade the Plotly camera button to download infinite-resolution SVGs
+        plot_config = {
+            'toImageButtonOptions': {
+                'format': 'svg', # 'svg' guarantees perfect vector quality
+                'filename': 'interactive_pseudospectrum'
+            },
+            'displaylogo': False
+        }
+        
+        fig.write_html(save_html, post_script=post_js, config=plot_config)
         print(f'Interactive HTML saved → {save_html}')
         
-    if static_filepath: save_static(G, subgraph, nodes, pos, low_prob_nodes, node_data, layout, intensities_are_log, title, edge_names, use_prob_styling, low_prob_opacity, prob_colorscale, highlight_color, normal_color, node_size, edge_width, static_filepath, style, xlim, root_idx, coherent_nodes, incoherent_alpha)
-    if show: fig.show()
+    if static_filepath: 
+        save_static(
+            G, subgraph, nodes, pos, low_prob_nodes, node_data, layout, 
+            intensities_are_log, title, edge_names, use_prob_styling, 
+            low_prob_opacity, prob_colorscale, highlight_color, normal_color, 
+            node_size, edge_width, static_filepath, 
+            style=style, 
+            xlim=xlim, 
+            ylim=ylim, 
+            root_idx=root_idx, 
+            coherent_nodes=coherent_nodes, 
+            incoherent_alpha=incoherent_alpha, 
+            annotation_results=annotation_results
+        )
+        
+    if show: fig.show(config=plot_config if 'plot_config' in locals() else None)
     return fig
 
 
