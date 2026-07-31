@@ -78,7 +78,7 @@ def main(args):
 
     # Setup MLflow tracking
     run_name = setup_mlflow(
-        experiment_name="MassGAT-Modular-Training"
+        experiment_name="MassGAT-Training"
     )
     mlflow_setup_time = time.time()
     print(f"MLflow setup completed (Time taken: {mlflow_setup_time - gpu_check_time:.2f}s)")

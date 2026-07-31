@@ -53,9 +53,6 @@ pixi run install-ionshed
 ```
 
 
-
-
-
 ## Usage
 
 **Data Preparation**
@@ -75,10 +72,13 @@ MassGAT/
             └── sample_02.mzML
 ```
 
-**Automatic Configuration Change Detection:**
+**Configuration**
 
-The trace segmentation and graph construction steps automatically detect when relevant [`config.yaml`](config.yaml) parameters change and reprocess files accordingly. To force reprocessing without changing config, use the `--force` flag on either script. See [Configuration Management & Change Detection](#configuration-management--change-detection) below for details on which parameters are tracked.
+MassGAT uses two configuration files:
 
+1. **[`config.yaml`](config.yaml)** — Analytical parameters (peak picking, graph construction, correlation thresholds). Changes are automatically detected by the trace segmentation and graph construction scripts, which will reprocess files accordingly. Use the `--force` flag to force reprocessing without changing config.
+
+2. **[`mass_differences.xlsx`](mass_differences.xlsx)** — Chemical mass differences (isotopes, adducts, dimers, and compatibility rules). When customized, you must regenerate graphs via Step 2 of [Prediction](#prediction). If you plan to retrain the model, also regenerate synthetic training data via Step 1 of [Training](#training).
 
 ### Prediction
 
