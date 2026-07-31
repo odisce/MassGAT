@@ -78,7 +78,7 @@ MassGAT uses two configuration files:
 
 1. **[`config.yaml`](config.yaml)** — Analytical parameters (peak picking, graph construction, correlation thresholds). Changes are automatically detected by the trace segmentation and graph construction scripts, which will reprocess files accordingly. Use the `--force` flag to force reprocessing without changing config.
 
-2. **[`mass_differences.xlsx`](mass_differences.xlsx)** — Chemical mass differences (isotopes, adducts, dimers, and compatibility rules). When customized, you must regenerate graphs via Step 2 of [Prediction](#prediction). If you plan to retrain the model, also regenerate synthetic training data via Step 1 of [Training](#training).
+2. **[`mass_differences.xlsx`](src/mass_differences.xlsx)** — Chemical mass differences (isotopes, adducts, dimers, and compatibility rules). When customized, you must regenerate graphs via Step 2 of [Prediction](#prediction). If you plan to retrain the model, also regenerate synthetic training data via Step 1 of [Training](#training).
 
 ### Prediction
 
