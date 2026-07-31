@@ -78,7 +78,13 @@ MassGAT uses two configuration files:
 
 1. **[`config.yaml`](config.yaml)** — Analytical parameters (peak picking, graph construction, correlation thresholds). Changes are automatically detected by the trace segmentation and graph construction scripts, which will reprocess files accordingly. Use the `--force` flag to force reprocessing without changing config.
 
-2. **[`mass_differences.xlsx`](src/mass_differences.xlsx)** — Chemical mass differences (isotopes, adducts, dimers, and compatibility rules). Entry names should use appropriate prefixes (`adduct_`, `loss_`, `mod_`) to define directionality in annotations. When customized, you must regenerate graphs via Step 2 of [Prediction](#prediction). If you plan to retrain the model, also regenerate synthetic training data via Step 1 of [Training](#training).
+2. **[`mass_differences.xlsx`](src/mass_differences.xlsx)** — Chemical mass differences (isotopes, adducts, dimers). Entry names should use appropriate prefixes (`adduct_`, `loss_`, `mod_`) to define directionality in annotations. The file contains the following sheets:
+   - **isotopes**: Isotope mass shifts (mode-independent). Columns: `name`, `mass_difference`, `frequency`
+   - **mods_positive / mods_negative**: Adducts/modifications for each ionization mode. Columns: `name`, `mass_difference`, `frequency`, `is_loss` (marks entries as losses)
+   - **dimers_positive / dimers_negative**: Dimer mass shifts for each ionization mode. Columns: `name`, `mass_difference`, `frequency`
+   - **compat_positive / compat_negative**: Compatibility for a chain of m/Z differences (e.g., how likely a H2O loss follows Na-H m/Z difference) for synthetic generation of components. Columns: `source_adduct`, `target_adduct`, `weight`.
+   
+   When customized, you must regenerate graphs via before training the model (see [Training](#training)).
 
 ### Prediction
 
