@@ -1,9 +1,14 @@
 options(repos = c(CRAN = "https://cloud.r-project.org/"))
 
 
-## Install from a binary file
-if (!requireNamespace("pak")) {
-  install.packages("pak", ask = FALSE, type = "binary")
+## Install pak (binary install only where supported, e.g. Windows/macOS)
+if (!requireNamespace("pak", quietly = TRUE)) {
+  pak_type <- if (.Platform$OS.type == "windows" || Sys.info()["sysname"] == "Darwin") {
+    "binary"
+  } else {
+    "source"
+  }
+  install.packages("pak", ask = FALSE, type = pak_type)
 }
 if (.Platform$OS.type == "windows") {
   download.file(
@@ -25,4 +30,6 @@ if (.Platform$OS.type == "windows") {
 
 if (require("ionshed")) {message("ionshed installed")}
 
-
+deps <- pak::pkg_deps("odisce/ionshed@v1.0.1", dependencies = TRUE)
+compile_deps <- deps$package[deps$needscompilation == TRUE]
+print(compile_deps)

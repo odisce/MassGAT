@@ -1,39 +1,42 @@
-FROM pytorch/pytorch:2.8.0-cuda12.6-cudnn9-devel
+ARG PIXI_VERSION=0.75.0
+ARG PIXI_ENV=cpu
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    PATH="/opt/conda/bin:$PATH" \
-    R_LIBS_USER=/library/R \
-    PYTHONPATH="/app/src:$PYTHONPATH" \
-    LC_ALL=C.UTF-8 \
-    LANG=C.UTF-8
+FROM ghcr.io/prefix-dev/pixi:${PIXI_VERSION} AS build
+ARG PIXI_ENV
 
-RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    build-essential cmake pkg-config git wget curl lsb-release \
-    software-properties-common dirmngr gnupg2 ca-certificates \
-    libcurl4-openssl-dev libssl-dev libxml2-dev libfontconfig1-dev \
-    libharfbuzz-dev libfribidi-dev libglpk-dev libnetcdf-dev \
-    libudunits2-dev libgdal-dev libproj-dev libgeos++-dev \
-    libhdf5-dev zlib1g-dev libbz2-dev liblzma-dev libpcre2-dev \
-    pandoc libgmp3-dev \
-    && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9 \
-    && add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/" \
-    && apt-get update -y \
-    && apt-get install -y --no-install-recommends r-base r-base-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-RUN python -m pip install --upgrade pip setuptools wheel ninja \
-    && python -m pip install --no-cache-dir \
-    pandas openpyxl numpy scipy scikit-learn matplotlib seaborn \
-    mlflow pyarrow tqdm numba pyyaml wandb torch-geometric \
-    && python -m pip install --no-cache-dir --no-build-isolation \
-    torch-scatter torch-sparse torch-cluster
 
-RUN mkdir -p /library/R && chmod 777 /library/R \
-    && echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"), download.file.method = "libcurl", HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /usr/lib/R/etc/Rprofile.site \
-    && R -e ".libPaths('/library/R'); pkgs <- c('remotes', 'arrow', 'BiocManager', 'fs', 'htmlwidgets', 'plotly', 'igraph'); install.packages(pkgs); if (any(!(pkgs %in% installed.packages()[,'Package']))) stop('ERREUR CRAN');" \
-    && R -e ".libPaths('/library/R'); bioc_pkgs <- c('mzR', 'MSnbase', 'QFeatures', 'MsExperiment', 'xcms'); BiocManager::install(bioc_pkgs, ask = FALSE, update = TRUE); if (any(!(bioc_pkgs %in% installed.packages()[,'Package']))) stop('ERREUR Bioconductor');" \
-    && git clone https://github.com/odisce/ionshed.git /opt/repo \
-    && R -e ".libPaths('/library/R'); remotes::install_local('/opt/repo', dependencies = TRUE, upgrade = 'never', force = TRUE)"
+COPY . .
 
-CMD ["/bin/bash"]
+RUN pixi install --locked -e ${PIXI_ENV}
+
+# install R's XML/ncdf4 instead of compiling from source
+RUN pixi add -e ${PIXI_ENV} r-ncdf4 netcdf4 r-xml libxml2
+
+# change paths to force pixi to use the correct environment
+ENV PATH=/app/.pixi/envs/${PIXI_ENV}/bin:$PATH
+ENV PKG_CONFIG_PATH=/app/.pixi/envs/${PIXI_ENV}/lib/pkgconfig
+ENV CPATH=/app/.pixi/envs/${PIXI_ENV}/include
+ENV LIBRARY_PATH=/app/.pixi/envs/${PIXI_ENV}/lib
+ENV LD_LIBRARY_PATH=/app/.pixi/envs/${PIXI_ENV}/lib
+
+RUN pixi run -e ${PIXI_ENV} install-ionshed
+
+RUN pixi shell-hook -e ${PIXI_ENV} -s bash > /shell-hook \
+    && echo "#!/bin/bash" > /app/entrypoint.sh \
+    && cat /shell-hook >> /app/entrypoint.sh \
+    && echo 'exec "$@"' >> /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh
+
+FROM ubuntu:24.04 AS production
+ARG PIXI_ENV
+
+WORKDIR /app
+
+COPY --from=build /app/.pixi/envs/${PIXI_ENV} /app/.pixi/envs/${PIXI_ENV}
+COPY --from=build /app/entrypoint.sh /app/entrypoint.sh
+COPY --from=build /app /app
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python", "-c", "print('massgat environment ready')"]
