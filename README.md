@@ -190,11 +190,14 @@ To retrain MassGAT on custom or synthetic data, first generate synthetic trainin
 
 ## Citation
 
+If you use MassGAT in your research, please cite our preprint:
+
+```bibtex
 @article{Pinart2026MassGAT,
   author  = {Pinart, Paul-Henri and Damont, Annelaure and Dechaumet, Sylvain and Thevenot, Etienne},
   title   = {MassGAT: a graph-based collective learning approach for untargeted detection and annotation of LC-MS data},
   journal = {bioRxiv},
   year    = {2026},
   doi     = {10.64898/2026.07.29.741473},
-  url     = {https://doi.org/10.64898/2026.07.29.741473}
+  url     = {[https://doi.org/10.64898/2026.07.29.741473](https://doi.org/10.64898/2026.07.29.741473)}
 }
