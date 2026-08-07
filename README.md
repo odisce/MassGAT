@@ -199,5 +199,5 @@ If you use MassGAT in your research, please cite our preprint:
   journal = {bioRxiv},
   year    = {2026},
   doi     = {10.64898/2026.07.29.741473},
-  url     = {[https://doi.org/10.64898/2026.07.29.741473](https://doi.org/10.64898/2026.07.29.741473)}
+  url     = {https://doi.org/10.64898/2026.07.29.741473}
 }
