@@ -4,12 +4,12 @@ requires-python = ">=3.8,<=3.11"
 version = "0.1.0"
 license = "CECILL-2.1"
 authors = [
-  { name = "Paul-Henri Pinart", email = "Paul-Henri.PINART@cea.fr" },
+  { name = "Paul-Henri Pinart", email = "paul-henri.pinart@cea.fr" },
   { name = "Sylvain Dechaumet", email = "sylvain.dechaumet@cea.fr" },
-  { name = "Etienne Thevenot", email = "Etienne.THEVENOT@cea.fr" }
+  { name = "Etienne Thevenot", email = "etienne.thevenot@cea.fr" }
 ]
 maintainers = [
-  { name = "Paul-Henri Pinart", email = "Paul-Henri.PINART@cea.fr" }
+  { name = "Paul-Henri Pinart", email = "paul-henri.pinart@cea.fr" }
 ]
 keywords = ["machine-learning", "graph-neural-networks", "lc-ms", "metabolomics"]
 classifiers = [

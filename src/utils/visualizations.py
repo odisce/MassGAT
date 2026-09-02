@@ -601,7 +601,7 @@ def save_static_combined(G, subgraph, nodes, pos, low_prob_nodes, node_data,
             )
             plotted_any = True
 
-    ax2.set_xlabel('Retention Time (min)', fontsize=cfg['axis_label_size'])
+    ax2.set_xlabel('Retention Time (s)', fontsize=cfg['axis_label_size'])
     ax2.set_ylabel('Raw Intensity', fontsize=cfg['axis_label_size'])
     ax2.tick_params(axis='both', which='major', labelsize=cfg['tick_size'])
     ax2.grid(True, lw=0.3, alpha=0.4)
@@ -877,7 +877,7 @@ def visualize_component(G, nodes, title='Component Visualization', layout='spati
             line_dash = 'dash' if profiles[node].get('is_low', False) else 'solid'
             fig.add_trace(go.Scatter(x=profiles[node]['rt'], y=profiles[node]['intensity_raw'], mode='lines', name=f'Node {node}', uid=f'profile-{node}', meta=node, line=dict(color=profiles[node]['color'], width=2, dash=line_dash)), row=1, col=2)
             
-        fig.update_xaxes(title_text='Retention Time (min)', row=1, col=2)
+        fig.update_xaxes(title_text='Retention Time (s)', row=1, col=2)
         fig.update_yaxes(title_text='Raw Intensity', row=1, col=2) 
     else:
         fig = go.Figure(data=graph_traces)
