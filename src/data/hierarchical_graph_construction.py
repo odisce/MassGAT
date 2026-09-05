@@ -516,6 +516,8 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt
         print(f"Total edges created: {len(edges)}")
     
     # Limit component sizes (optional)
+    if limit_component_size_value is None:
+        limit_component_size_value = config.MAX_COMPONENT_SIZE
     if limit_component_size_value is not None:
         print("Step 5: Limiting component sizes...")
         log_progress("Step 5: Limiting component sizes...")
@@ -579,7 +581,7 @@ def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
     # Time candidate collection step
     candidate_start = time.time()
     peaks_sorted, candidate_pairs = collect_candidate_peak_pairs(
-        peaks_df, config.MASS_DIFFS, mz_tolerance=config.MZ_TOLERANCE, rt_tolerance=config.RT_WINDOW
+        peaks_df, config.ACTIVE_MASS_DIFFS, mz_tolerance=config.MZ_TOLERANCE, rt_tolerance=config.RT_WINDOW
     )
     candidate_time = time.time() - candidate_start
 
@@ -715,7 +717,7 @@ def detect_adduct_patterns(peaks_df, raw_signals, valid_eic_mask, roi_to_idx, ma
     # Time candidate collection
     candidate_start = time.time()
     peaks_sorted, candidate_pairs = collect_candidate_peak_pairs(
-        main_peaks_df, config.ADDUCT_DIFFS, mz_tolerance=config.MZ_TOLERANCE, rt_tolerance=config.RT_WINDOW
+        main_peaks_df, config.ACTIVE_ADDUCT_DIFFS, mz_tolerance=config.MZ_TOLERANCE, rt_tolerance=config.RT_WINDOW
     )
     candidate_time = time.time() - candidate_start
 
@@ -778,7 +780,7 @@ def detect_dimer_patterns(peaks_df, roi_to_idx, main_ions, signals_df, show_prog
     candidate_pairs = []  # List of tuples (roi_i, roi_k, delta_name)
 
     # For each dimer type, find monomer-dimer pairs
-    for dimer_name, correction in config.DIMER_DIFFS.items():
+    for dimer_name, correction in config.ACTIVE_DIMER_DIFFS.items():
         if show_progress:
             print(f"  Searching for {dimer_name} (correction: {correction:.5f})")
         
@@ -855,469 +857,72 @@ def detect_dimer_patterns(peaks_df, roi_to_idx, main_ions, signals_df, show_prog
     return edges
 
 
-def limit_component_size(edges, peaks_df, K=100):
+# The higher the value the lower chance the edge will be cut. np.inf protects isotope links
+EDGE_CUT_PRIORITY = {'isotope': np.inf, 'adduct': 3.0, 'dimer': 2.0, 'mod': 1.0, 'loss': 1.0}
+
+
+def edge_cut_score(edge_type, corr):
+    """Score used to rank edges from the most to the least expendable."""
+    return EDGE_CUT_PRIORITY.get(edge_type.split('_')[0], 1.0) * corr
+
+
+def limit_component_size(edges, peaks_df, K=200):
     """
-    Split large connected components to ensure all components ≤ K nodes.
-    Uses isotope contraction + MST-based cutting with chemical hierarchy preservation.
-    
+    Break up connected components larger than K by cutting their weakest links.
+
+    Isotope edges are never cut, while the remaining edges get a score combining the chemical priority of their type
+    with the profile correlation, and the lowest scoring ones inside oversized
+    components are dropped in batches until every component holds at most K peaks.
+
     Args:
         edges: List of (idx_i, idx_j, edge_type_name, correlation) tuples
-        peaks_df: DataFrame with peak information (for RT, m/z data)
-        K: Maximum component size (default 50)
-    
+        peaks_df: DataFrame with peak information (kept for signature compatibility)
+        K: Maximum component size
+
     Returns:
-        limited_edges: List of edges after component splitting
-        split_metadata: Dict with splitting statistics
+        limited_edges: List of edges after cutting
+        split_metadata: Dict with cutting statistics
     """
-    
-    if not edges:
-        print("No edges to process")
-        return edges, {'components_processed': 0, 'components_split': 0}
-    
-    # Build NetworkX graph from edges
+    if not edges or K is None:
+        return edges, {'components_processed': 0, 'components_split': 0, 'max_component_size': 0}
+
     G = nx.Graph()
-    
-    # Add all nodes from peaks_df
-    for idx in range(len(peaks_df)):
-        G.add_node(idx)
-    
-    # Edge type priorities (higher = more important, never cut)
-    edge_type_priority = {
-        # Isotopes - highest priority, never split
-        'isotope_13C': 1000, 'isotope_15N': 1000, 'isotope_18O': 1000, 
-        'isotope_34S': 1000, 'isotope_37Cl': 1000,
-        # Dimers - high priority 
-        'dimer_2M+H': 500, 'dimer_2M+Na': 500, 'dimer_2M+NH4': 500,
-        # Adducts - medium priority
-        'adduct_Na-H': 100, 'adduct_H2O': 100, 'adduct_NH3': 100, 'adduct_HCOOH': 100,
-        'adduct_CO': 100, 'adduct_CO2': 100, 'adduct_K-Na': 100, 'adduct_2H': 100,
-        'adduct_O': 100, 'adduct_H': 100,
-        # Profile correlations - lowest priority (not used anymore)
-        'profile_correlation': 10
-    }
-    
-    # Add edges with attributes
-    for edge_id, (i, j, edge_type, corr) in enumerate(edges):
-        if i < len(peaks_df) and j < len(peaks_df):
-            # Get peak properties for better scoring
-            peak_i = peaks_df.iloc[i]
-            peak_j = peaks_df.iloc[j]
-            
-            mz_i, mz_j = peak_i['mzmed'], peak_j['mzmed']
-            rt_i, rt_j = peak_i['rtmeanw'], peak_j['rtmeanw']
-            intensity_i, intensity_j = peak_i['into'], peak_j['into']
-            
-            # Intensity ratio factor (penalize very different intensities)
-            intensity_ratio = max(intensity_i, intensity_j) / max(min(intensity_i, intensity_j), 1e-6)
-            intensity_factor = 1.0 / (1.0 + max(0, intensity_ratio - 2.0))  # Penalty if ratio > 2
-            
-            # RT proximity factor (already captured in correlation but add direct penalty)
-            rt_diff = abs(rt_i - rt_j)
-            rt_factor = max(0.1, 1.0 - rt_diff / 30.0)  # Penalty for RT > 30s apart
-            
-            # Edge type priority (much more important than small differences)
-            type_priority = edge_type_priority.get(edge_type, 50)
-            
-            # Base score: type_priority * correlation^2 
-            base_score = type_priority * (corr ** 2)
-            
-            # Apply factors
-            score = base_score * intensity_factor * rt_factor
-            
-            # Store additional debug info
-            G.add_edge(i, j, 
-                      edge_type=edge_type, 
-                      corr=corr, 
-                      mz_diff=abs(mz_i - mz_j),
-                      rt_diff=rt_diff,
-                      intensity_ratio=intensity_ratio,
-                      intensity_factor=intensity_factor,
-                      rt_factor=rt_factor,
-                      base_score=base_score,
-                      score=score,
-                      edge_id=edge_id)
-    
-    print(f"Built graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
-    
-    # Find connected components
+    G.add_nodes_from(range(len(peaks_df)))
+    for i, j, edge_type, corr in edges:
+        G.add_edge(i, j, edge_type=edge_type, corr=corr, score=edge_cut_score(edge_type, corr))
+
+    n_before = G.number_of_edges()
     components = list(nx.connected_components(G))
-    large_components = [comp for comp in components if len(comp) > K]
-    
-    print(f"Found {len(components)} components, {len(large_components)} need splitting (size > {K})")
-    
-    # Quick exit for small graphs
-    if not large_components:
-        return edges, {
-            'components_processed': len(components),
-            'components_split': 0,
-            'max_component_size': max(len(comp) for comp in components) if components else 0
-        }
-    
-    # Performance optimization: Skip component limiting for very large components (>500 nodes)
-    # Use simple random splitting instead
-    huge_components = [comp for comp in large_components if len(comp) > 500]
-    manageable_components = [comp for comp in large_components if len(comp) <= 500]
-    
-    if huge_components:
-        print(f"Found {len(huge_components)} huge components (>500 nodes), using fast random splitting")
-    
-    # Process each large component
-    new_edges = []
-    split_metadata = {
+    n_oversized = sum(1 for comp in components if len(comp) > K)
+    print(f"Found {len(components)} components, {n_oversized} above K={K}")
+
+    while True:
+        oversized_comps = [comp for comp in nx.connected_components(G) if len(comp) > K]
+        if not oversized_comps:
+            break
+        oversized = set().union(*oversized_comps)
+        # only edges sitting inside an oversized component are candidates
+        cuttable = sorted(
+            (d['score'], u, v) for u, v, d in G.edges(data=True)
+            if u in oversized and np.isfinite(d['score'])
+        )
+        if not cuttable:
+            print(f"WARNING: {len(oversized)} nodes remain in oversized components with no cuttable edge left")
+            break
+        # one cut per K peaks in excess
+        batch = max(1, sum(len(comp) // K for comp in oversized_comps))
+        G.remove_edges_from([(u, v) for _, u, v in cuttable[:batch]])
+
+    limited_edges = [(u, v, d['edge_type'], d['corr']) for u, v, d in G.edges(data=True)]
+    sizes = [len(comp) for comp in nx.connected_components(G)]
+    print(f"Cut {n_before - len(limited_edges)} edges, max component size now {max(sizes) if sizes else 0}")
+
+    return limited_edges, {
         'components_processed': len(components),
-        'components_split': len(large_components),
-        'original_sizes': [len(comp) for comp in large_components],
-        'final_sizes': [],
-        'cut_edges': []
+        'components_split': n_oversized,
+        'max_component_size': max(sizes) if sizes else 0,
+        'cut_edges': n_before - len(limited_edges),
     }
-    
-    # Keep edges from small components unchanged
-    small_components = [comp for comp in components if len(comp) <= K]
-    for comp in small_components:
-        subgraph = G.subgraph(comp)
-        for u, v, data in subgraph.edges(data=True):
-            new_edges.append((u, v, data['edge_type'], data['corr']))
-    
-    # Fast splitting for huge components (random partitioning)
-    for comp_idx, comp in enumerate(huge_components):
-        comp_list = list(comp)
-        print(f"Fast splitting huge component {comp_idx + 1}/{len(huge_components)} (size: {len(comp)})")
-        
-        # Calculate optimal partition size (aim for K*0.8 to avoid tiny fragments)
-        target_size = max(K // 2, int(K * 0.6))  # Aim for 30-40 nodes per partition
-        num_partitions = max(1, len(comp_list) // target_size)
-        
-        for i in range(num_partitions):
-            start_idx = i * len(comp_list) // num_partitions
-            end_idx = (i + 1) * len(comp_list) // num_partitions
-            partition = comp_list[start_idx:end_idx]
-            
-            if len(partition) > K:  # Still too big, split further
-                sub_partitions = [partition[j:j+K] for j in range(0, len(partition), K)]
-                for sub_partition in sub_partitions:
-                    subgraph = G.subgraph(sub_partition)
-                    for u, v, data in subgraph.edges(data=True):
-                        new_edges.append((u, v, data['edge_type'], data['corr']))
-                    split_metadata['final_sizes'].append(len(sub_partition))
-            else:
-                subgraph = G.subgraph(partition)
-                for u, v, data in subgraph.edges(data=True):
-                    new_edges.append((u, v, data['edge_type'], data['corr']))
-                split_metadata['final_sizes'].append(len(partition))
-    
-    # Sophisticated splitting for manageable components
-    for comp_idx, comp in enumerate(manageable_components):
-        print(f"Processing manageable component {comp_idx + 1}/{len(manageable_components)} (size: {len(comp)})")
-        
-        subgraph = G.subgraph(comp).copy()
-        partitions = _split_component(subgraph, K)
-        
-        # Add edges within each partition
-        for partition in partitions:
-            partition_subgraph = subgraph.subgraph(partition)
-            for u, v, data in partition_subgraph.edges(data=True):
-                new_edges.append((u, v, data['edge_type'], data['corr']))
-        
-        partition_sizes = [len(p) for p in partitions]
-        split_metadata['final_sizes'].extend(partition_sizes)
-        print(f"Split into {len(partitions)} partitions: {partition_sizes}")
-        
-        # CRITICAL: Validate that all partitions are ≤ K
-        oversized_partitions = [size for size in partition_sizes if size > K]
-        if oversized_partitions:
-            print(f"WARNING: Found oversized partitions after splitting: {oversized_partitions}")
-            print(f"This should never happen! Partitions > {K}: {oversized_partitions}")
-    
-    # Final validation of all partition sizes
-    all_final_sizes = split_metadata['final_sizes']
-    max_final_size = max(all_final_sizes) if all_final_sizes else 0
-    oversized_final = [size for size in all_final_sizes if size > K]
-    
-    print(f"Component splitting complete. Final edge count: {len(new_edges)}")
-    print(f"Final validation - Max component size: {max_final_size}, Oversized components: {len(oversized_final)}")
-    
-    if oversized_final:
-        print(f"ERROR: Component limiting failed! Found components larger than {K}: {oversized_final}")
-        print("Applying emergency random splitting to oversized components...")
-        
-        # Emergency fallback: find and randomly split oversized components
-        final_edges = []
-        G_final = nx.Graph()
-        G_final.add_edges_from([(u, v) for u, v, _, _ in new_edges])
-        
-        final_components = list(nx.connected_components(G_final))
-        for comp in final_components:
-            if len(comp) <= K:
-                # Keep edges for small components
-                subgraph = G_final.subgraph(comp)
-                for u, v in subgraph.edges():
-                    # Find original edge data
-                    for orig_u, orig_v, edge_type, corr in new_edges:
-                        if (orig_u == u and orig_v == v) or (orig_u == v and orig_v == u):
-                            final_edges.append((orig_u, orig_v, edge_type, corr))
-                            break
-            else:
-                # Emergency split: randomly partition oversized component
-                comp_list = list(comp)
-                num_partitions = (len(comp_list) + K - 1) // K  # Ceiling division
-                for i in range(num_partitions):
-                    start_idx = i * K
-                    end_idx = min((i + 1) * K, len(comp_list))
-                    partition = comp_list[start_idx:end_idx]
-                    
-                    # Add edges within this partition only
-                    subgraph = G_final.subgraph(partition)
-                    for u, v in subgraph.edges():
-                        # Find original edge data
-                        for orig_u, orig_v, edge_type, corr in new_edges:
-                            if (orig_u == u and orig_v == v) or (orig_u == v and orig_v == u):
-                                final_edges.append((orig_u, orig_v, edge_type, corr))
-                                break
-                
-                print(f"Emergency split component of size {len(comp)} into {num_partitions} partitions")
-        
-        new_edges = final_edges
-        print(f"After emergency splitting: {len(new_edges)} edges")
-    
-    return new_edges, split_metadata
-
-
-def _split_component(G, K):
-    """
-    Split a single large component using isotope contraction + MST cutting.
-    """
-    # Step 1: Contract isotope families (never split these)
-    contracted_G, supernode_map = _contract_isotope_families(G)
-    
-    if len(contracted_G) <= K:
-        # After contraction, component is small enough
-        return [set(G.nodes())]
-    
-    # Step 2: Build MST on contracted graph
-    # Use negative scores for maximum spanning tree
-    for u, v, data in contracted_G.edges(data=True):
-        data['weight'] = -data['score']  # Negative for MST
-    
-    mst = nx.maximum_spanning_tree(contracted_G, weight='weight')
-    
-    # Step 3: Smart cutting to create balanced partitions
-    # Target partition size: aim for 60-80% of K to avoid tiny fragments
-    min_partition_size = max(K // 3, 10)  # Minimum 10 nodes or K/3
-    target_partition_size = int(K * 0.7)   # Target 70% of K
-    
-    current_trees = [mst.copy()]
-    
-    while any(len(_expand_supernode_tree(tree, supernode_map)) > K for tree in current_trees):
-        # Find tree with largest expanded size
-        tree_sizes = [len(_expand_supernode_tree(tree, supernode_map)) for tree in current_trees]
-        largest_tree_idx = max(range(len(tree_sizes)), key=lambda i: tree_sizes[i])
-        largest_tree = current_trees[largest_tree_idx]
-        
-        if largest_tree.number_of_edges() == 0:
-            break  # Can't split further
-        
-        # Smart edge selection: find edge that creates most balanced split
-        best_edge = None
-        best_balance_score = float('-inf')
-        
-        for edge in largest_tree.edges(data=True):
-            u, v = edge[0], edge[1]
-            # Temporarily remove edge and check resulting component sizes
-            temp_tree = largest_tree.copy()
-            temp_tree.remove_edge(u, v)
-            
-            components = list(nx.connected_components(temp_tree))
-            if len(components) == 2:  # Should split into exactly 2 parts
-                sizes = [len(_expand_supernode_tree(temp_tree.subgraph(comp), supernode_map)) 
-                        for comp in components]
-                
-                # Calculate balance score (prefer more balanced splits)
-                min_size, max_size = min(sizes), max(sizes)
-                
-                # Penalty for tiny components
-                if min_size < min_partition_size:
-                    balance_score = -1000  # Heavy penalty
-                else:
-                    # Reward balanced splits, with preference for target size
-                    balance_score = min_size / max_size  # Higher is more balanced
-                    
-                    # Bonus if both parts are close to target size
-                    if target_partition_size <= min_size <= K and target_partition_size <= max_size <= K:
-                        balance_score += 0.5
-                
-                if balance_score > best_balance_score:
-                    best_balance_score = balance_score
-                    best_edge = edge
-        
-        # If no good balanced split found, fall back to weakest edge
-        if best_edge is None:
-            best_edge = min(largest_tree.edges(data=True),
-                          key=lambda x: (x[2]['score'], x[2]['edge_id']))
-        
-        # Remove the selected edge
-        largest_tree.remove_edge(best_edge[0], best_edge[1])
-        
-        # Split into connected components
-        current_trees.pop(largest_tree_idx)
-        new_components = list(nx.connected_components(largest_tree))
-        for comp in new_components:
-            current_trees.append(largest_tree.subgraph(comp).copy())
-    
-    # Step 4: Expand supernodes back to original nodes
-    final_partitions = []
-    for tree in current_trees:
-        partition = _expand_supernode_tree(tree, supernode_map)
-        final_partitions.append(partition)
-    
-    # Step 5: CRITICAL - Ensure no single nodes are isolated
-    # (unless they were already isolated in the original graph)
-    final_partitions = _ensure_no_isolated_singles(final_partitions, G, supernode_map)
-    
-    return final_partitions
-
-
-def _contract_isotope_families(G):
-    """Contract nodes connected by isotope edges into supernodes."""
-    isotope_types = {'isotope_13C', 'isotope_15N', 'isotope_18O', 'isotope_34S', 'isotope_37Cl'}
-    
-    # Find isotope edges
-    isotope_edges = [(u, v) for u, v, data in G.edges(data=True) 
-                     if data['edge_type'] in isotope_types]
-    
-    # Find connected components of isotope edges
-    isotope_graph = nx.Graph()
-    isotope_graph.add_nodes_from(G.nodes())
-    isotope_graph.add_edges_from(isotope_edges)
-    
-    isotope_families = list(nx.connected_components(isotope_graph))
-    
-    # Create contracted graph
-    contracted_G = nx.Graph()
-    supernode_map = {}  # supernode_id -> set of original nodes
-    
-    # Create supernodes for isotope families
-    for family_idx, family in enumerate(isotope_families):
-        if len(family) > 1:
-            supernode_id = f"super_{family_idx}"
-            contracted_G.add_node(supernode_id)
-            supernode_map[supernode_id] = family
-        else:
-            # Single node families stay as is
-            node = list(family)[0]
-            contracted_G.add_node(node)
-            supernode_map[node] = {node}
-    
-    # Add edges between supernodes
-    for u, v, data in G.edges(data=True):
-        # Find which supernodes u and v belong to
-        u_supernode = None
-        v_supernode = None
-        
-        for supernode, nodes in supernode_map.items():
-            if u in nodes:
-                u_supernode = supernode
-            if v in nodes:
-                v_supernode = supernode
-        
-        # Only add edge if different supernodes
-        if u_supernode != v_supernode and not contracted_G.has_edge(u_supernode, v_supernode):
-            contracted_G.add_edge(u_supernode, v_supernode, **data)
-        elif u_supernode != v_supernode:
-            # Keep highest scoring edge between supernodes
-            existing_score = contracted_G[u_supernode][v_supernode]['score']
-            if data['score'] > existing_score:
-                contracted_G[u_supernode][v_supernode].update(data)
-    
-    return contracted_G, supernode_map
-
-
-def _expand_supernode_tree(tree, supernode_map):
-    """Expand a tree of supernodes back to original nodes."""
-    expanded_nodes = set()
-    for supernode in tree.nodes():
-        expanded_nodes.update(supernode_map[supernode])
-    return expanded_nodes
-
-
-def _ensure_no_isolated_singles(partitions, original_graph, supernode_map):
-    """
-    Ensure no single nodes are isolated during partitioning.
-    Isotope super-nodes are allowed to be isolated since they maintain internal connectivity.
-    """
-    # Find single-node partitions
-    single_node_partitions = []
-    multi_node_partitions = []
-    
-    for partition in partitions:
-        if len(partition) == 1:
-            node = list(partition)[0]
-            
-            # Check if this single node was part of an isotope family
-            was_in_isotope_family = False
-            for supernode, original_nodes in supernode_map.items():
-                if node in original_nodes and len(original_nodes) > 1:
-                    was_in_isotope_family = True
-                    break
-            
-            if was_in_isotope_family:
-                # This single node was extracted from an isotope family - it's fine to be isolated
-                # because it maintains connectivity within the isotope group
-                multi_node_partitions.append(partition)
-            else:
-                # This is a truly isolated single node - needs to be merged
-                single_node_partitions.append(partition)
-        else:
-            multi_node_partitions.append(partition)
-    
-    if not single_node_partitions:
-        return partitions  # No isolated singles to fix
-    
-    print(f"Found {len(single_node_partitions)} isolated single nodes, merging with neighbors...")
-    
-    # For each isolated single node, find the best partition to merge it with
-    for single_partition in single_node_partitions:
-        single_node = list(single_partition)[0]
-        
-        # Find all neighbors of this node in the original graph
-        neighbors = set(original_graph.neighbors(single_node))
-        
-        if not neighbors:
-            # Truly isolated node in original graph - keep as is
-            multi_node_partitions.append(single_partition)
-            continue
-        
-        # Find which existing partitions contain these neighbors
-        neighbor_partitions = []
-        for i, partition in enumerate(multi_node_partitions):
-            if neighbors & partition:  # Intersection - partition contains some neighbors
-                neighbor_partitions.append((i, len(neighbors & partition)))
-        
-        if neighbor_partitions:
-            # Merge with partition that has the most neighbors
-            best_partition_idx = max(neighbor_partitions, key=lambda x: x[1])[0]
-            
-            # Check if merging would exceed K limit
-            target_partition = multi_node_partitions[best_partition_idx]
-            if len(target_partition) < 50:  # Safe to merge
-                multi_node_partitions[best_partition_idx] = target_partition | single_partition
-                print(f"Merged isolated node {single_node} with partition of size {len(target_partition)}")
-            else:
-                # Target partition is full, find smallest partition instead
-                smallest_partition_idx = min(range(len(multi_node_partitions)), 
-                                           key=lambda i: len(multi_node_partitions[i]))
-                if len(multi_node_partitions[smallest_partition_idx]) < 50:
-                    multi_node_partitions[smallest_partition_idx] |= single_partition
-                    print(f"Merged isolated node {single_node} with smallest partition")
-                else:
-                    # All partitions are full, keep as isolated (shouldn't happen)
-                    multi_node_partitions.append(single_partition)
-                    print(f"WARNING: Could not merge isolated node {single_node}, all partitions full")
-        else:
-            # No neighbors in any partition (shouldn't happen after proper splitting)
-            multi_node_partitions.append(single_partition)
-            print(f"WARNING: Isolated node {single_node} has no neighbors in any partition")
-    
-    return multi_node_partitions
 
 
 def _deduplicate_undirected_edges_numpy(edge_indices, similarities, edge_type_indices):

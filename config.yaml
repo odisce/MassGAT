@@ -6,6 +6,7 @@ graph:
   mz_tolerance: 0.001               # m/z tolerance in Da for mass difference edges
   min_signals: 8                    # Minimum number of signals required per ROI
   eic_len: 32                       # Fixed length for EIC vectors after interpolation
+  max_component_size: 200          # Cut the weakest edges until components hold at most N peaks (null = no cutting)
 
 # Peak Picking Parameters (ionshed)
 peak_picking:

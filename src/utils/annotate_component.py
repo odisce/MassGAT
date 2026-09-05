@@ -476,7 +476,8 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
         base_delta=base_delta,
     )
 
-    gidx_to_roi  = {i: roi_values[i].item() for i in range(len(roi_values))}
+    # called once per validated component to generate candidate annotations
+    gidx_to_roi  = dict(enumerate(roi_values.tolist()))
     roi_to_gidx  = {v: k for k, v in gidx_to_roi.items()}
     gidx_to_mz   = {i: node_features[i, 0].item() for i in component_gidx_set}
     gidx_to_int  = {i: node_features[i, 2].item() for i in component_gidx_set}

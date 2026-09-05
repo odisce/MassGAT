@@ -38,5 +38,11 @@ COPY --from=build /app/.pixi/envs/${PIXI_ENV} /app/.pixi/envs/${PIXI_ENV}
 COPY --from=build /app/entrypoint.sh /app/entrypoint.sh
 COPY --from=build /app /app
 
+ENV PATH=/app/.pixi/envs/${PIXI_ENV}/bin:$PATH
+ENV PKG_CONFIG_PATH=/app/.pixi/envs/${PIXI_ENV}/lib/pkgconfig
+ENV CPATH=/app/.pixi/envs/${PIXI_ENV}/include
+ENV LIBRARY_PATH=/app/.pixi/envs/${PIXI_ENV}/lib
+ENV LD_LIBRARY_PATH=/app/.pixi/envs/${PIXI_ENV}/lib
+
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "-c", "print('massgat environment ready')"]
