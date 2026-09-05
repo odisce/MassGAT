@@ -22,6 +22,7 @@ RT_WINDOW = _CONFIG['graph']['rt_window']
 MZ_TOLERANCE = _CONFIG['graph']['mz_tolerance']
 EIC_LEN = _CONFIG['graph']['eic_len']
 MIN_SIGNALS = _CONFIG['graph']['min_signals']
+MAX_COMPONENT_SIZE = _CONFIG['graph'].get('max_component_size')
 
 # Peak Picking parameters
 RTTOL = _CONFIG['peak_picking']['rttol']
@@ -85,11 +86,27 @@ def _empty_cfg():
         'DIMER_FREQUENCIES_POSITIVE': {}, 'DIMER_FREQUENCIES_NEGATIVE': {},
         'MOD_COMPATIBILITY_POSITIVE': {}, 'MOD_COMPATIBILITY_NEGATIVE': {},
         'ADDUCT_LOSSES': set(),
+        'DISABLED_DIFFS': {'isotopes': set(), 'positive': set(), 'negative': set()},
     }
 
 def _clean(x):
     x = str(x or '')
     return x.replace('\ufeff', '').strip().strip('"\'')
+
+def _sheet_rows(ws):
+    """
+    Checks whether the mass differences are enabled or disabled in the Excel
+    Returns a list of tuples (row, enabled) where 'enabled' is a boolean indicating if the row is enabled.
+    """
+    rows = list(ws.iter_rows(values_only=True))
+    header = [_clean(h).lower() for h in rows[0]]
+    idx = header.index('enabled') if 'enabled' in header else None
+    out = []
+    for row in rows[1:]:
+        flag = None if idx is None or idx >= len(row) else row[idx]
+        enabled = flag is None or flag == '' or str(flag).strip().strip('"\'').lower() not in ('0','false','no','n','off')
+        out.append((row, enabled))
+    return out
 
 def load_config(excel_path=None):
     if not excel_path:
@@ -105,50 +122,61 @@ def load_config(excel_path=None):
     
     # Isotopes
     if 'isotopes' in wb:
-        for row in wb['isotopes'].iter_rows(min_row=2, values_only=True):
+        for row, enabled in _sheet_rows(wb['isotopes']):
             name, diff, freq = row[:3]
             if name:
+                name = _clean(name)
                 if diff is not None:
-                    cfg['ISOTOPE_DIFFS'][_clean(name)] = float(diff)
-                if freq is not None:
-                    cfg['ISOTOPE_FREQUENCIES'][_clean(name)] = float(freq)
+                    cfg['ISOTOPE_DIFFS'][name] = float(diff)
+                if not enabled:
+                    cfg['DISABLED_DIFFS']['isotopes'].add(name)
+                elif freq is not None:
+                    cfg['ISOTOPE_FREQUENCIES'][name] = float(freq)
 
     
     # Mods, dimers, compatibility for both modes
     for mode in ('positive', 'negative'):
+        disabled = cfg['DISABLED_DIFFS'][mode]
+
         # Mods
         sheet = f'mods_{mode}'
         if sheet in wb:
-            for row in wb[sheet].iter_rows(min_row=2, values_only=True):
+            for row, enabled in _sheet_rows(wb[sheet]):
                 name, diff, freq, is_loss = row[:4]
                 if name:
                     name = _clean(name)
                     if diff is not None:
                         cfg[f'MOD_DIFFS_{mode.upper()}'][name] = float(diff)
-                    if freq is not None:
-                        cfg[f'MOD_FREQUENCIES_{mode.upper()}'][name] = float(freq)
-                    if is_loss and str(is_loss).lower() in ('1', 'true', 'yes', 'x'):
+                    if is_loss and str(is_loss).lower() in ('1', 'true', 'yes', 'vrai', 'x'):
                         cfg['ADDUCT_LOSSES'].add(name)
+                    if not enabled:
+                        disabled.add(name)
+                    elif freq is not None:
+                        cfg[f'MOD_FREQUENCIES_{mode.upper()}'][name] = float(freq)
         
         # Dimers
         sheet = f'dimers_{mode}'
         if sheet in wb:
-            for row in wb[sheet].iter_rows(min_row=2, values_only=True):
+            for row, enabled in _sheet_rows(wb[sheet]):
                 name, diff, freq = row[:3]
                 if name:
                     name = _clean(name)
                     if diff is not None:
                         cfg[f'DIMER_DIFFS_{mode.upper()}'][name] = float(diff)
-                    if freq is not None:
+                    if not enabled:
+                        disabled.add(name)
+                    elif freq is not None:
                         cfg[f'DIMER_FREQUENCIES_{mode.upper()}'][name] = float(freq)
         
         # Compatibility
         sheet = f'compat_{mode}'
         if sheet in wb:
-            for row in wb[sheet].iter_rows(min_row=2, values_only=True):
+            for row, _ in _sheet_rows(wb[sheet]):
                 source, target, weight = row[:3]
                 if source and target and weight is not None:
                     source, target = _clean(source), _clean(target)
+                    if source in disabled or target in disabled:
+                        continue
                     target_dict = cfg[f'MOD_COMPATIBILITY_{mode.upper()}']
                     target_dict.setdefault(source, {})[target] = float(weight)
 
@@ -173,6 +201,7 @@ DIMER_FREQUENCIES_NEGATIVE = _TABLE_CFG['DIMER_FREQUENCIES_NEGATIVE']
 MOD_COMPATIBILITY_POSITIVE = _TABLE_CFG['MOD_COMPATIBILITY_POSITIVE']
 MOD_COMPATIBILITY_NEGATIVE = _TABLE_CFG['MOD_COMPATIBILITY_NEGATIVE']
 ADDUCT_LOSSES = _TABLE_CFG['ADDUCT_LOSSES']
+DISABLED_DIFFS = _TABLE_CFG['DISABLED_DIFFS']
 
 # Dynamic variables initialized based on mode detection
 MASS_DIFFS = ISOTOPE_DIFFS.copy()
@@ -181,6 +210,13 @@ DIMER_DIFFS = {}   # Will be set by configure_for_mode()
 ADDUCT_FREQUENCIES = {}  # Will be set by configure_for_mode()
 DIMER_FREQUENCIES = {}  # Will be set by configure_for_mode()
 ADDUCT_COMPATIBILITY = {}  # Will be set by configure_for_mode()
+
+# Same dicts minus the entries switched off in mass_differences.xlsx. Edge detection
+# reads these, everything that encodes or decodes edge type numbers reads the ones
+# above, which always hold every entry of the sheet.
+ACTIVE_MASS_DIFFS = {}
+ACTIVE_ADDUCT_DIFFS = {}
+ACTIVE_DIMER_DIFFS = {}
 
 
 def configure_for_mode(mode):
@@ -191,6 +227,7 @@ def configure_for_mode(mode):
         mode: 'positive' ou 'negative'
     """
     global MASS_DIFFS, ADDUCT_DIFFS, DIMER_DIFFS, ADDUCT_COMPATIBILITY, ADDUCT_FREQUENCIES, DIMER_FREQUENCIES
+    global ACTIVE_MASS_DIFFS, ACTIVE_ADDUCT_DIFFS, ACTIVE_DIMER_DIFFS
     
     # Always include isotopes
     MASS_DIFFS = ISOTOPE_DIFFS.copy()
@@ -209,6 +246,13 @@ def configure_for_mode(mode):
         DIMER_FREQUENCIES = DIMER_FREQUENCIES_NEGATIVE.copy()
     else:
         raise ValueError(f"Unknown ionization mode: {mode}")
+
+    disabled = DISABLED_DIFFS['isotopes'] | DISABLED_DIFFS[mode]
+    ACTIVE_MASS_DIFFS = {k: v for k, v in MASS_DIFFS.items() if k not in disabled}
+    ACTIVE_ADDUCT_DIFFS = {k: v for k, v in ADDUCT_DIFFS.items() if k not in disabled}
+    ACTIVE_DIMER_DIFFS = {k: v for k, v in DIMER_DIFFS.items() if k not in disabled}
+    if disabled:
+        print(f"Disabled mass differences ({mode}): {sorted(disabled)}")
     
 
 
