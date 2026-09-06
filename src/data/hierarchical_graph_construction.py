@@ -360,7 +360,7 @@ def filter_duplicate_edge_types(edges, peaks_df):
 
 
 def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt_window=None, include_profile_correlations=False, ionization_mode = None, 
-                             show_progress=True, limit_component_size_value=None, debug_hanging=False,
+                             show_progress=True, limit_component_size_value=200, debug_hanging=False,
                              eic_extraction_mode='uniform'):
     import time
     global_step_start = time.time()

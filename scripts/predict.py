@@ -7,12 +7,31 @@ import csv
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import scipy.sparse as sp
 from tqdm import tqdm
 from src.models import MassGAT, IndependentPeakClassifier
 from src.data.loader import load_single_synthetic_file, load_mzml_file
 from src.data.single_loader import SinglePeakDataset, extract_peaks_from_pt
 from src.training.trainer import ChroMSTrainer
 from src.utils.annotate_component import annotate_component
+
+
+def _validated_components(edge_index, valid_mask):
+    """Connected components of the sub-graph left once rejected peaks are removed.
+
+    This function aims to break large components by removing low-confidence nodes, helping with the downstream annotation step
+    """
+    n_nodes = valid_mask.shape[0]
+    adj = sp.coo_matrix(
+        (np.ones(edge_index.shape[1]), (edge_index[0], edge_index[1])),
+        shape=(n_nodes, n_nodes),
+    )
+    _, labels = sp.csgraph.connected_components(adj, connection='weak')
+
+    pieces = {}
+    for gidx in np.flatnonzero(valid_mask):
+        pieces.setdefault(labels[gidx], set()).add(int(gidx))
+    return [piece for piece in pieces.values() if len(piece) > 1]
 
 
 def _load_state_dict(path):
@@ -279,8 +298,8 @@ def main(args):
     # Setup output file handling
     if output_per_file:
         # One file per input file
-        file_writers = {}  # fname -> (file_handle, csv_writer)
-        metadata_output_csv = None  # Not used in per-file mode
+        file_writers = {}  
+        metadata_output_csv = None  
     else:
         # Combined output file
         metadata_output_csv = str(target_tsv.with_name(f"{target_tsv.stem}_peaks.tsv"))
@@ -325,9 +344,9 @@ def main(args):
                 if graph_prob is not None and graph_prob < args.min_graph_prob:
                     continue
 
-                ranked = []
-                # Requirement 3: only components > 1 and <= max_annotation_size
-                if (not skip_top_annotations) and data_type == 'real' and 1 < num_peaks <= args.max_annotation_size and node_probs is not None:
+                annotations_by_roi = {}
+                # The size limit applies to the validated parts of the component
+                if (not skip_top_annotations) and data_type == 'real' and num_peaks > 1 and node_probs is not None:
                     ann_start = time.perf_counter()
                     try:
                         node_features_real = node_features.clone()
@@ -337,23 +356,35 @@ def main(args):
                         node_features_real[:, 3] = node_features[:, 3] * 60
                         node_features_real[:, 4] = node_features[:, 4] * 60
 
-                        edge_index_roi = data_obj.roi_values[data_obj.edge_index]
+                        edge_index_np = data_obj.edge_index.cpu().numpy()
+                        valid_mask = node_probs_arr >= args.min_node_prob
+                        keep_edge = valid_mask[edge_index_np[0]] & valid_mask[edge_index_np[1]]
+                        keep_edge_t = torch.from_numpy(keep_edge)
+
+                        edge_index_roi = data_obj.roi_values[data_obj.edge_index[:, keep_edge_t]]
+                        edge_attr_valid = data_obj.edge_attr[keep_edge_t]
                         node_probs_map = {
                             (fname, int(roi_ids[idx])): float(node_probs_arr[idx])
                             for idx in range(len(roi_ids))
                         }
 
-                        ranked = annotate_component(
-                            component_gidx_set=set(range(num_peaks)),
-                            node_features=node_features_real,
-                            edge_index=edge_index_roi,
-                            edge_attr=data_obj.edge_attr,
-                            node_probs=node_probs_map,
-                            file_name=fname,
-                            roi_values=data_obj.roi_values,
-                            prob_threshold=0.5,
-                            temperature=3.0,
-                        )
+                        for piece in _validated_components(edge_index_np[:, keep_edge], valid_mask):
+                            if len(piece) > args.max_annotation_size:
+                                continue
+                            ranked = annotate_component(
+                                component_gidx_set=piece,
+                                node_features=node_features_real,
+                                edge_index=edge_index_roi,
+                                edge_attr=edge_attr_valid,
+                                node_probs=node_probs_map,
+                                file_name=fname,
+                                roi_values=data_obj.roi_values,
+                                prob_threshold=args.min_node_prob,
+                                temperature=3.0,
+                            )
+                            for k, hypothesis in enumerate(ranked[:5]):
+                                for roi_key, annotation in hypothesis['node_annotations'].items():
+                                    annotations_by_roi.setdefault(int(roi_key), [''] * 5)[k] = annotation
                     except Exception as e:
                         print(f"Annotation error in component {component_id}: {e}")
                     t_annotations += time.perf_counter() - ann_start
@@ -389,12 +420,10 @@ def main(args):
                             continue
 
                         # Requirement 1: Extract string annotations specifically for the current node under each hypothesis k
-                        top_ann_cols = {}
-                        for k in range(5):
-                            if k < len(ranked):
-                                top_ann_cols[f'top_annotation_{k+1}'] = ranked[k]['node_annotations'].get(int(roi), '')
-                            else:
-                                top_ann_cols[f'top_annotation_{k+1}'] = ''
+                        top_ann_cols = {
+                            f'top_annotation_{k+1}': annotation
+                            for k, annotation in enumerate(annotations_by_roi.get(int(roi), [''] * 5))
+                        }
 
                         mzmin_v = mz_v
                         mzmax_v = mz_v
@@ -486,10 +515,10 @@ if __name__ == '__main__':
     parser.add_argument('--with_top_annotations', dest='skip_top_annotations', action='store_false')
     parser.add_argument('--output_per_file', action='store_true', default=False, help='Save one peak file per input file (named as input file) instead of combined output')
     
-    # New options for filtering and optimization
+    # Options for filtering and optimization
     parser.add_argument('--min_node_prob', type=float, default=0.5, help='Keep peaks with node_prob >= threshold')
     parser.add_argument('--min_graph_prob', type=float, default=0.0, help='Keep peaks in components with graph_prob >= threshold')
-    parser.add_argument('--max_annotation_size', type=int, default=200, help='Skip annotation for components larger than this to prevent bottleneck')
+    parser.add_argument('--max_annotation_size', type=int, default=200, help='Skip annotation for validated components larger than this to prevent bottleneck')
     parser.add_argument('--ionshed_output_dir', type=str, default=None, help='Path to ionshed output directory containing _peak.feather files')
     
     args = parser.parse_args()
