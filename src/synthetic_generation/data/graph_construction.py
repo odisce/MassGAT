@@ -514,7 +514,7 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, ha
     # Limit component sizes to avoid memory issues (optional)
     if limit_component_size_enabled:
         limit_start = time.time()
-        edges, split_metadata = limit_component_size(edges, peaks_df, K=50)
+        edges, split_metadata = limit_component_size(edges, peaks_df, K=config.MAX_COMPONENT_SIZE)
         limit_time = time.time() - limit_start
     else:
         limit_time = 0

@@ -14,6 +14,7 @@ from src.data.loader import load_single_synthetic_file, load_mzml_file
 from src.data.single_loader import SinglePeakDataset, extract_peaks_from_pt
 from src.training.trainer import ChroMSTrainer
 from src.utils.annotate_component import annotate_component
+from src.utils.common import read_feather
 
 
 def _validated_components(edge_index, valid_mask):
@@ -80,7 +81,7 @@ def _load_roi_mzmin_mzmax_mapping(ionshed_output_dir, file_name):
         return {}
     
     try:
-        df = pd.read_feather(feather_path)
+        df = read_feather(feather_path)
         
         # Create mapping: roi -> (mzmin, mzmax)
         roi_mapping = {}

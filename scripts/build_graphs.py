@@ -16,6 +16,7 @@ try:
     from src.data.hierarchical_graph_construction import build_hierarchical_graph
     from src.config import MIN_SIGNALS
     from src.utils.config_utils import config_changed, save_config_metadata
+    from src.utils.common import read_feather
 except ModuleNotFoundError:
     # Allow direct execution of this file (python path/to/script.py)
     project_root = Path(__file__).resolve().parents[2]
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
     from src.data.hierarchical_graph_construction import build_hierarchical_graph
     from src.config import MIN_SIGNALS
     from src.utils.config_utils import config_changed, save_config_metadata
+    from src.utils.common import read_feather
 
 
 def log(message):
@@ -111,8 +113,8 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
             continue
 
         try:
-            peaks_df = pd.read_feather(peak_file)
-            signals_df = pd.read_feather(signal_file)
+            peaks_df = read_feather(peak_file)
+            signals_df = read_feather(signal_file)
 
             if "sc_length" in peaks_df.columns:
                 peaks_df = peaks_df[peaks_df["sc_length"] >= MIN_SIGNALS]
@@ -129,6 +131,10 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
                 for roi, g in signals_df.groupby("roi")
             }
 
+            limit_comp_size = None
+            if isinstance(config, dict):
+                limit_comp_size = config.get('graph', {}).get('max_component_size', None)
+
             edge_index, edge_attr, node_features, roi_values = build_hierarchical_graph(
                 peaks_df,
                 raw_signals,
@@ -136,6 +142,7 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
                 file_id=None,
                 show_progress=False,
                 ionization_mode=ionization_mode,
+                limit_component_size_value=limit_comp_size,
                 eic_extraction_mode=eic_extraction_mode,
             )
 
