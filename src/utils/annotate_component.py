@@ -4,10 +4,12 @@ import re
 from src import config as project_config
 
 PROTON = 1.007276
+ELECTRON = 0.00054858
 PPM_TOL = 5.0
 
+# Neutral monoisotopic masses; the electron is accounted for with the charge
 ATOM_MASSES = {
-    'H':  1.0072765,  'Na': 22.9897693, 'K':  38.9637068,
+    'H':  1.0078250,  'Na': 22.9897693, 'K':  38.9637068,
     'N':  14.0030740, 'C':  12.0000000, 'O':  15.9949146,
     'S':  31.9720707, 'Cl': 34.9688527, 'F':  18.9984032,
     'P':  30.973762,
@@ -19,6 +21,16 @@ MH_DELTA = {'H': +1}
 M_MINUS_H_DELTA = {'H': -1}
 MNa_DELTA = {'Na': +1}
 MK_DELTA = {'K': +1}
+MNH4_DELTA = {'N': +1, 'H': +4}
+MCl_DELTA = {'Cl': +1}
+MHCOO_DELTA = {'H': +1, 'C': +1, 'O': +2}
+
+# Main ions tried for each candidate root when ion_hypotheses='default'
+POSITIVE_ION_HYPOTHESES = [MH_DELTA, MNa_DELTA, MNH4_DELTA, MK_DELTA]
+NEGATIVE_ION_HYPOTHESES = [M_MINUS_H_DELTA, MCl_DELTA, MHCOO_DELTA]
+
+# Atoms a metabolite cannot lose: [M+H+K-Na]+ is not a real ion
+NON_REMOVABLE_ATOMS = ('Na', 'K', 'Cl')
 
 def build_reverse_encoding(mass_diffs, adduct_diffs, dimer_diffs):
     reverse = {}
@@ -134,6 +146,9 @@ def _infer_mode_from_names(names):
     return None
 
 def _resolve_mode_settings(reverse_encoding=None, ionization_mode=None, base_delta=None):
+    """The ionization mode given by the caller wins over the one inferred from the config or the edge names."""
+    if ionization_mode not in (None, 'positive', 'negative'):
+        raise ValueError(f"Unknown ionization mode: {ionization_mode}")
     mode = ionization_mode
     if mode is None and reverse_encoding:
         mode = _infer_mode_from_names(name for name, _ in reverse_encoding.values())
@@ -236,11 +251,15 @@ def build_annotation_string(base, mods, isos, charge):
     if isos:
         result += "_" + "_".join(isos)
     return result
-    
+
+BASE_LABELS = {'+H': MH_DELTA, '-H': M_MINUS_H_DELTA, '+Na': MNa_DELTA, '+K': MK_DELTA,
+               '+NH4': MNH4_DELTA, '+Cl': MCl_DELTA, '+HCOO': MHCOO_DELTA}
+
 def get_base_mod_str(base_delta):
-    """Extract base adduct string (+H, -H, etc)."""
-    if base_delta == MH_DELTA: return '+H'
-    if base_delta == M_MINUS_H_DELTA: return '-H'
+    """Extract base adduct string (+H, -H, +NH4, etc)."""
+    for label, delta in BASE_LABELS.items():
+        if base_delta == delta:
+            return label
     res = ''
     for atom, count in base_delta.items():
         if count > 0: res += f"+{atom}{count if count>1 else ''}"
@@ -266,7 +285,19 @@ def simplify_mods(mods_list):
             species = term
             
         counts[species] = counts.get(species, 0) + num * multiplier
-        
+
+    # One notation for the ammonium adduct: +H+NH3 -> +NH4, +NH4-NH3 -> +H
+    n = min(counts.get('H', 0), counts.get('NH3', 0))
+    if n > 0:
+        counts['H'] -= n
+        counts['NH3'] -= n
+        counts['NH4'] = counts.get('NH4', 0) + n
+    n = min(counts.get('NH4', 0), -counts.get('NH3', 0))
+    if n > 0:
+        counts['NH4'] -= n
+        counts['NH3'] += n
+        counts['H'] = counts.get('H', 0) + n
+
     pos_terms = []
     neg_terms = []
     
@@ -294,17 +325,94 @@ def simplify_mods(mods_list):
             
     return "".join(pos_terms) + "".join(neg_terms)
 
-def atoms_to_mass_addition(atoms: dict) -> float:
+def atoms_to_mass_addition(atoms: dict, charge='+') -> float:
+    """Mass added to M by the atom deltas of a singly charged ion (electron included)."""
     total = 0.0
     for atom, count in atoms.items():
         if atom in HEAVY_ISOTOPES:
             total += ISOTOPE_MASS_SHIFTS[atom] * count
         else:
             total += ATOM_MASSES.get(atom, 0.0) * count
-    return total
+    return total + (ELECTRON if charge.endswith('-') else -ELECTRON)
+
+
+def is_consistent_ion(atoms):
+    """False when the annotation removes an atom that the metabolite does not carry (Na, K, Cl)."""
+    return all(atoms.get(a, 0) >= 0 for a in NON_REMOVABLE_ATOMS)
+
+
+# Charge carriers and salt exchanges are not restricted; C2H3N is the solvent adduct
+IONIC_TERMS = ('H', 'Na', 'K', 'NH4', 'Cl', 'HCOO')
+SOLVENT_TERMS = ('C2H3N',)
+
+
+def plausible_ion(mods):
+    """False when the ion gains a neutral molecule, carries two solvent adducts, or a solvent adduct and a loss."""
+    gained = solvent = lost = 0
+    for sign, num, term in re.findall(r'([+-])(\d*)([A-Za-z][A-Za-z0-9]*)', mods):
+        if term in IONIC_TERMS:
+            continue
+        n = int(num or 1)
+        if sign == '-':
+            lost += n
+        elif term in SOLVENT_TERMS:
+            solvent += n
+        else:
+            gained += n
+    return gained == 0 and solvent <= 1 and not (solvent and lost)
+
+
+def carries_loss(mods):
+    """True when the modifications of an ion include a lost neutral (a removed H, Na, K or Cl is not one)."""
+    return any(sign == '-' and term not in ('H', 'Na', 'K', 'Cl')
+               for sign, _, term in re.findall(r'([+-])(\d*)([A-Za-z][A-Za-z0-9]*)', simplify_mods(mods)))
+
+
+K41_SHIFT = 1.998119
+
+
+def isotope_label(parent_mz, child_mz, chem_part, parent_atoms):
+    """'41K' for the M+2 isotope of an ion carrying K when the shift is closer to 41K than to the edge type."""
+    if chem_part in ('34S', '37Cl') and parent_atoms.get('K', 0) > 0:
+        shift = child_mz - parent_mz
+        if abs(shift - K41_SHIFT) < abs(shift - ISOTOPE_MASS_SHIFTS.get(chem_part, K41_SHIFT)):
+            return '41K'
+    return chem_part
+
+
+EXPLAIN_PPM = 10.0
+C13_SHIFT = 1.00336
+
+
+def doubly_charged(mz, rt, intensity, mz_tol=0.0015, rt_tol=5.0):
+    """Nodes with a co-eluting, less intense partner at +1.00336/2 m/z: their isotope spacing says z = 2."""
+    mz, rt, intensity = (np.asarray(a, dtype=float) for a in (mz, rt, intensity))
+    order = np.argsort(mz)
+    smz = mz[order]
+    lo = np.searchsorted(smz, mz + C13_SHIFT / 2 - mz_tol, 'left')
+    hi = np.searchsorted(smz, mz + C13_SHIFT / 2 + mz_tol, 'right')
+    out = np.zeros(len(mz), dtype=bool)
+    for i in np.where(hi > lo)[0]:
+        cand = order[lo[i]:hi[i]]
+        out[i] = np.any((np.abs(rt[cand] - rt[i]) <= rt_tol) & (intensity[cand] < intensity[i]))
+    return out
+
+
+def explains(observed_mz, atoms, is_dimer, charge, neutral_mass, ppm=EXPLAIN_PPM):
+    """True when the annotation of a node gives back the neutral mass of the root."""
+    if charge in ('2+', '2-'):
+        # one more proton added (removed) than in the singly charged ion
+        sign = 1 if charge == '2+' else -1
+        implied = 2.0 * observed_mz - atoms_to_mass_addition(atoms, charge[1]) - sign * PROTON
+    else:
+        implied = observed_mz - atoms_to_mass_addition(atoms, charge)
+    if is_dimer:
+        implied /= 2.0
+    return abs(implied - neutral_mass) / (neutral_mass + 1e-9) * 1e6 <= ppm
 
 
 def compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_threshold):
+    """Probability-weighted mean of the neutral masses implied by the annotated nodes."""
     estimates = []
     for gidx, (atoms, is_dimer, t_base, t_mods, t_isos, t_charge) in atom_deltas.items():
         if is_dimer or t_charge in ["2+", "2-"]:
@@ -312,7 +420,7 @@ def compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_
         prob = gidx_to_prob.get(gidx, 0.0)
         if prob >= prob_threshold:
             observed_mz = gidx_to_mz[gidx]
-            addition = atoms_to_mass_addition(atoms)
+            addition = atoms_to_mass_addition(atoms, t_charge)
             M_i = observed_mz - addition
             estimates.append((gidx, M_i, prob))
 
@@ -329,7 +437,9 @@ def compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_
 # Propagate annotations for a given candidate
 def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                            gidx_to_mz, gidx_to_prob, prob_threshold=0.5,
-                           base_delta=MH_DELTA, charge='+'):
+                           base_delta=MH_DELTA, charge='+', dimer_after_loss=True):
+    """Annotation of the nodes reached from the candidate. dimer_after_loss=False: a dimer edge is not followed from
+    an ion carrying a neutral loss (a dimer forms from the intact molecule; doubly charged ions are not concerned)."""
     
     adduct_edges  = [(s, d, n, c) for s, d, n, c in component_edges if c == 'adduct']
     dimer_edges   = [(s, d, n, c) for s, d, n, c in component_edges if c == 'dimer']
@@ -402,6 +512,7 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
                     continue
                     
                 if cur_is_dimer: continue
+                if not dimer_after_loss and carries_loss(cur_mods): continue
                 
                 neutral_atoms = _apply_delta(cur_atoms, base_delta, -1)
                 doubled_atoms = {a: c * 2 for a, c in neutral_atoms.items()}
@@ -458,7 +569,7 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
             child_atoms = apply_edge_delta(cur_atoms, ename, parent_is_lighter=True)
             if child_atoms is None: continue
             
-            chem_part = get_raw_chem_string(ename, cat)
+            chem_part = isotope_label(cur_mz, other_mz, get_raw_chem_string(ename, cat), cur_atoms)
             node_state[other] = (child_atoms, cur_is_dimer, cur_base, list(cur_mods), list(cur_isos) + [chem_part], cur_charge)
             iso_visited.add(other)
             iso_queue.append(other)
@@ -468,13 +579,37 @@ def propagate_annotations(candidate_gidx, component_gidx_set, component_edges,
 
 def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
                         node_probs, file_name, roi_values, reverse_encoding=None,
-                        prob_threshold=0.5, temperature=2.0, base_delta=None, ionization_mode=None):
-    
+                        prob_threshold=0.5, temperature=2.0, base_delta=None, ionization_mode=None,
+                        ion_hypotheses=None, score_mode='children', charge_states=None, plausibility=False,
+                        dimer_after_loss=True):
+    """Rank the candidate main ions of a component.
+
+    ion_hypotheses: None (each root is the base_delta ion, [M+H]+ or [M-H]- by default),
+    'default' (also [M+Na]+, [M+NH4]+, [M+K]+ or [M+Cl]-, [M+HCOO]-) or a list of atom deltas.
+    An alternative hypothesis is kept for a root only when it gives fewer inconsistent
+    annotations (e.g. [M+H+K-Na]+) than the first one; the score is then weighted by the share
+    of consistent annotations, and ties keep the order of the list.
+    score_mode: 'children' (number of direct neighbours, first version) or 'explained' (number of consistent ions
+    whose annotation gives back the neutral mass of the root, see explains).
+    charge_states: {roi: 2} for doubly charged nodes (see doubly_charged); a singly charged annotation of such a
+    node is inconsistent.
+    plausibility: an implausible ion (see plausible_ion) is inconsistent and left out of the node annotations,
+    with its isotopes.
+    dimer_after_loss: see propagate_annotations.
+    """
+    if score_mode not in ('children', 'explained'):
+        raise ValueError(f"Unknown score mode: {score_mode}")
     ionization_mode, reverse_encoding, base_delta, charge = _resolve_mode_settings(
         reverse_encoding=reverse_encoding,
         ionization_mode=ionization_mode,
         base_delta=base_delta,
     )
+    if ion_hypotheses is None:
+        hypotheses = [base_delta]
+    elif ion_hypotheses == 'default':
+        hypotheses = NEGATIVE_ION_HYPOTHESES if ionization_mode == 'negative' else POSITIVE_ION_HYPOTHESES
+    else:
+        hypotheses = list(ion_hypotheses)
 
     # called once per validated component to generate candidate annotations
     gidx_to_roi  = dict(enumerate(roi_values.tolist()))
@@ -551,10 +686,10 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
 
     results = []
 
-    for candidate_gidx in candidates:
+    for candidate_gidx, hypothesis in ((c, h) for c in candidates for h in hypotheses):
         candidate_mz  = gidx_to_mz[candidate_gidx]
         candidate_int = gidx_to_int[candidate_gidx]
-        implied_M     = candidate_mz - atoms_to_mass_addition(base_delta)
+        implied_M     = candidate_mz - atoms_to_mass_addition(hypothesis, charge)
         children      = {}
 
         for src_gidx, dst_gidx, etype_name, category in component_edges:
@@ -605,15 +740,25 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
         atom_deltas = propagate_annotations(
             candidate_gidx, component_gidx_set, component_edges,
             gidx_to_mz, gidx_to_prob, prob_threshold,
-            base_delta=base_delta, charge=charge
+            base_delta=hypothesis, charge=charge, dimer_after_loss=dimer_after_loss
         )
 
         mass_regression = compute_neutral_mass_regression(atom_deltas, gidx_to_mz, gidx_to_prob, prob_threshold)
 
         node_annotations = {}
+        n_inconsistent = 0
+        n_explained = 0
         for gidx, (atoms, is_dimer, t_base, t_mods, t_isos, t_charge) in atom_deltas.items():
+            if plausibility and not plausible_ion(simplify_mods(t_mods)):
+                n_inconsistent += 1
+                continue
             annotation = build_annotation_string(t_base, t_mods, t_isos, t_charge)
             node_annotations[gidx_to_roi[gidx]] = annotation
+            consistent = is_consistent_ion(atoms)
+            if charge_states and charge_states.get(gidx_to_roi[gidx], 1) == 2 and t_charge in ('+', '-'):
+                consistent = False
+            n_inconsistent += not consistent
+            n_explained += consistent and explains(gidx_to_mz[gidx], atoms, is_dimer, t_charge, implied_M)
 
         if n_children >= 2 and n_isotope_children >= 1:
             confidence = 'high'
@@ -633,17 +778,28 @@ def annotate_component(component_gidx_set, node_features, edge_index, edge_attr,
             'norm_intensity':       round(float(norm_intensity), 4),
             'norm_prob':            round(float(norm_prob), 4),
             'confidence':           confidence,
+            'ion_hypothesis':       build_annotation_string('M', [get_base_mod_str(hypothesis)], [], charge),
+            'n_inconsistent':       n_inconsistent,
+            'n_explained':          n_explained,
+            'n_propagated':         len(atom_deltas),
         })
+        if hypothesis is not hypotheses[0]:
+            first = next(r for r in results if r['candidate_gidx'] == candidate_gidx)
+            if n_inconsistent >= first['n_inconsistent']:
+                results.pop()
 
     # Normalized Scoring
     if results:
-        max_n_c = max(r['n_children'] for r in results) or 1
+        count = 'n_children' if score_mode == 'children' else 'n_explained'
+        max_n_c = max(r[count] for r in results) or 1
         max_n_iso = max(r['n_isotope_children'] for r in results) or 1
         for r in results:
-            r['score'] = (r['n_children'] / max_n_c * 1.0 + 
+            r['score'] = (r[count] / max_n_c * 1.0 + 
                           r['n_isotope_children'] / max_n_iso * 0.5 +
                           r['norm_intensity'] * 2.0 + 
                           r['norm_prob'] * 0.5)
+            if len(hypotheses) > 1 or charge_states or plausibility:
+                r['score'] *= 1.0 - r['n_inconsistent'] / max(r['n_propagated'], 1)
 
     results.sort(key=lambda x: -x['score'])
 

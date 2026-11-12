@@ -1,7 +1,6 @@
 #!/usr/bin/env Rscript
 library(ionshed)
 library(arrow)
-library(xcms)
 library(MSnbase)
 library(yaml)
 
@@ -21,6 +20,9 @@ get_script_path <- function() {
 
 # Load configuration from YAML
 load_config <- function(config_path = NULL) {
+    if (is.null(config_path) && nzchar(Sys.getenv("MASSGAT_CONFIG"))) {
+        config_path <- Sys.getenv("MASSGAT_CONFIG")
+    }
     if (is.null(config_path)) {
         # Try to find config.yaml relative to this script (project_root/config.yaml,
         # assuming script lives at project_root/scripts/)
@@ -120,18 +122,9 @@ process_file <- function(file_path, output_folder, force = FALSE, config = NULL)
         if (!is.null(res$roi_data)) {
             cat(paste("nrow(res$roi_data):", nrow(res$roi_data)), "\n")
         }
-        # Extract the XICs
-        roi_res <- tryCatch({
-            extract_xics(roi_ls = res, rttol = XIC_RTTOL)
-        }, error = function(e) {
-            cat("Error in extract_xics:", e$message, "\n")
-            return(NULL)
-        })
-        if (!is.null(roi_res)) {
-            cat("XICs extracted\n")
-        } else {
-            cat("XICs extraction failed\n")
-        }
+        # Sort the signals by ROI before saving them
+        data.table::setkey(res$roi_data, "roi")
+        cat("Signals sorted by ROI\n")
 
         # Save results in arrow format
         cat("Saving results...\n")
@@ -150,7 +143,7 @@ process_file <- function(file_path, output_folder, force = FALSE, config = NULL)
         cat("  ROI data:", roi_output, "\n")
         
         # Clean up memory
-        rm(MSnExpObj, res, roi_res)
+        rm(MSnExpObj, res)
         gc()
         
         return(list(

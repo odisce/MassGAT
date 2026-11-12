@@ -17,14 +17,14 @@ from ..data import load_synthetic_dataset
 class ChroMSTrainer:
     """Main trainer class"""
     def __init__(self, model, learning_rate=0.0001, device='cpu',
-                 alpha=1.0, beta=1.0, delta=2.0, gamma=0.5,
+                 alpha=1.0, beta=1.0, delta=1.0, gamma=0.5,
                  model_type="hierarchical", loss_fn=full_hierarchical_loss):
         self.model = model.to(device)
         self.device = device
 
         # set loss function parameters
-        self.alpha = alpha # node
-        self.beta = beta # graph
+        self.alpha = alpha # graph
+        self.beta = beta # node
         self.delta = delta # edge
         self.gamma = gamma # consistency
 
@@ -94,7 +94,7 @@ class ChroMSTrainer:
                         labels = batch.y,
                         positive_mask = batch.positive_mask, 
                         batch = batch.batch,
-                        alpha=self.alpha, beta=self.beta, gamma=self.gamma, use_focal=True,
+                        alpha=self.alpha, beta=self.beta, gamma=self.gamma, delta=self.delta, use_focal=True,
                         is_singleton=is_singleton)
                 
                 loss = loss_dict['total_loss']
@@ -256,7 +256,7 @@ class ChroMSTrainer:
                         labels = batch.y,
                         positive_mask = batch.positive_mask, 
                         batch = batch.batch,
-                        alpha=self.alpha, beta=self.beta, gamma=self.gamma, use_focal=True
+                        alpha=self.alpha, beta=self.beta, gamma=self.gamma, delta=self.delta, use_focal=True
                     )
                     val_loss = loss_dict['total_loss']
 

@@ -61,6 +61,30 @@ def log_progress(message):
     except Exception as e:
         print(f"[LOGGING ERROR] {e}")
 
+def _table_rows(df, columns):
+    """Rows of df as tuples, with the same values as iterrows."""
+    if df.empty:
+        return []
+    return zip(*(df[c].tolist() for c in columns))
+
+
+def _first_at_offset(mz, rows, offset, inclusive):
+    """For each i of rows, first k with mz[k] - mz[i] >= offset (inclusive) or > offset, mz sorted.
+
+    mz[k] - mz[i] is computed as in a loop over k, so that the bounds do not depend on rounding.
+    """
+    n = len(mz)
+    k = np.searchsorted(mz, mz[rows] + offset - 1e-6, side='left')
+    todo = np.arange(len(rows))
+    while todo.size:
+        todo = todo[k[todo] < n]
+        d = mz[k[todo]] - mz[rows[todo]]
+        behind = d < offset[todo] if inclusive else d <= offset[todo]
+        todo = todo[behind]
+        k[todo] += 1
+    return k
+
+
 def collect_candidate_peak_pairs(peaks_df, mz_deltas, dimer_specs=None, mz_tolerance=None, rt_tolerance=None):
     import time
     step_start = time.time()
@@ -99,28 +123,27 @@ def collect_candidate_peak_pairs(peaks_df, mz_deltas, dimer_specs=None, mz_toler
 
     candidate_pairs = []
 
-    # Detect regular mass differences
+    # Detect regular mass differences: for each peak i, the peaks k with delta - tol <= mz[k] - mz[i] <= delta + tol
+    first = np.arange(n - 1) if n > 1 else np.zeros(0, dtype=np.int64)
     for delta_name, delta in mz_deltas.items():
-        i = 0
-        j = 0
-        while i < n - 1:
-            #j = i + 1
-            while j < n and mz[j] - mz[i] < delta - mz_tolerance:
-                j += 1
-            
-            k = j
-
-            while k < n and mz[k] - mz[i] <= delta + mz_tolerance:
-                if abs(rt[k] - rt[i]) <= rt_tolerance:
-                    # Store both (i,k) and (k,i) to cover bidirectional matching
-                    candidate_pairs.append((roi[i], roi[k], delta_name))
-                    candidate_pairs.append((roi[k], roi[i], delta_name))
-
-                    # Update the DataFrame with the matched ROIs
-                    peaks_df_sorted.at[k, f"match_{delta_name}"] = roi[i]
-                    peaks_df_sorted.at[i, f"match_{delta_name}"] = roi[k]
-                k += 1
-            i += 1
+        if n < 2:
+            continue
+        start = np.maximum.accumulate(_first_at_offset(mz, first, np.full(n - 1, delta - mz_tolerance), inclusive=True))
+        stop = np.maximum(start, _first_at_offset(mz, first, np.full(n - 1, delta + mz_tolerance), inclusive=False))
+        count = stop - start
+        ii = np.repeat(first, count)
+        kk = np.repeat(start, count) + (np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count))
+        keep = np.abs(rt[kk] - rt[ii]) <= rt_tolerance
+        ii, kk = ii[keep], kk[keep]
+        match = peaks_df_sorted[f"match_{delta_name}"].to_numpy(dtype=np.float64, copy=True)
+        for i, k, roi_i, roi_k in zip(ii.tolist(), kk.tolist(), roi[ii], roi[kk]):
+            # Store both (i,k) and (k,i) to cover bidirectional matching
+            candidate_pairs.append((roi_i, roi_k, delta_name))
+            candidate_pairs.append((roi_k, roi_i, delta_name))
+            # Update the DataFrame with the matched ROIs
+            match[k] = roi_i
+            match[i] = roi_k
+        peaks_df_sorted[f"match_{delta_name}"] = match
 
     # Detect dimers (need to multiply by 2)
     if dimer_specs:
@@ -194,9 +217,13 @@ def precompute_intensity_profiles(signals_df, roi_list, rt_grid=None):
         rt_grid = np.unique(signals_filtered['rt'].values)
     grid_time = time.time() - grid_start
 
-    # Pre-group signals by ROI (vectorized approach)
+    # Pre-group signals by ROI (the table is sorted by roi, then rt)
     pregroup_start = time.time()
-    roi_groups = signals_filtered.groupby('roi')
+    roi_arr = signals_filtered['roi'].to_numpy()
+    rt_arr = signals_filtered['rt'].to_numpy()
+    i_arr = signals_filtered['i'].to_numpy()
+    bounds = np.flatnonzero(np.r_[True, roi_arr[1:] != roi_arr[:-1], True])
+    roi_slices = dict(zip(roi_arr[bounds[:-1]].tolist(), zip(bounds[:-1].tolist(), bounds[1:].tolist())))
     pregroup_time = time.time() - pregroup_start
     
     print(f"  Preprocessing: filter={filter_time:.2f}s, sort={sort_time:.2f}s, groupby={groupby_time:.2f}s, grid={grid_time:.2f}s, pregroup={pregroup_time:.2f}s")
@@ -206,11 +233,9 @@ def precompute_intensity_profiles(signals_df, roi_list, rt_grid=None):
     profiles = {}
     interp_count = 0
     for roi in roi_list:
-        if roi in roi_groups.groups:
-            group = roi_groups.get_group(roi)
-            rt_vals = group['rt'].values
-            intensity_vals = group['i'].values
-            profiles[roi] = np.interp(rt_grid, rt_vals, intensity_vals, left=0, right=0)
+        if roi in roi_slices:
+            a, b = roi_slices[roi]
+            profiles[roi] = np.interp(rt_grid, rt_arr[a:b], i_arr[a:b], left=0, right=0)
             interp_count += 1
         else:
             profiles[roi] = np.zeros_like(rt_grid)
@@ -522,7 +547,8 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt
         print("Step 5: Limiting component sizes...")
         log_progress("Step 5: Limiting component sizes...")
         limit_start = time.time()
-        edges, split_metadata = limit_component_size(edges, peaks_df, K=limit_component_size_value)
+        edges, split_metadata = limit_component_size(edges, peaks_df, K=limit_component_size_value,
+                                                     method=config.COMPONENT_SPLIT)
         limit_time = time.time() - limit_start
         print(f"Component size limiting: {limit_time:.2f}s")
         log_progress(f"Component size limiting: {limit_time:.2f}s")
@@ -559,6 +585,29 @@ def build_hierarchical_graph(peaks_df, raw_signals, signals_df, file_id=None, rt
     
 
     return edge_index, edge_attr, node_features, roi_values
+
+
+# m/z shift and isotope / monoisotopic intensity ratio per atom (IUPAC abundances)
+HEAVY_ISOTOPE_SHIFTS = {'isotope_34S': 1.995796, 'isotope_37Cl': 1.997050}
+K41_SHIFT = 1.998119
+S34_RATIO, K41_RATIO = 0.0447, 0.0722
+
+
+def heavy_isotope_label(shift, ratio, mz_tol, min_37cl_ratio=0.2):
+    """Edge type of an M+2 pair near 2 Da from its m/z shift and intensity ratio, None when neither fits.
+
+    37Cl (0.32 per Cl) above min_37cl_ratio, 34S from half the ratio of one S up to that threshold, and 41K
+    (one K, within a factor 2) kept as a 34S edge, the type the published model was trained with for it.
+    """
+    def near(ref):
+        return abs(shift - ref) <= mz_tol
+    if near(HEAVY_ISOTOPE_SHIFTS['isotope_37Cl']) and ratio >= min_37cl_ratio:
+        return 'isotope_37Cl'
+    if near(HEAVY_ISOTOPE_SHIFTS['isotope_34S']) and S34_RATIO / 2 <= ratio < min_37cl_ratio:
+        return 'isotope_34S'
+    if near(K41_SHIFT) and K41_RATIO / 2 <= ratio <= K41_RATIO * 2:
+        return 'isotope_34S'
+    return None
 
 
 def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
@@ -604,13 +653,14 @@ def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
     # Validate isotope pairs with intensity ratio
     validated_pairs = []
     min_37cl_ratio = getattr(config, 'ISOTOPE_37CL_MIN_RATIO', 0.2)
+    ratio_rule = config.ISOTOPE_LABEL_RULE == 'ratio'
+    heavy_pairs = set()
     
-    roi_to_peak = {row['roi']: row for _, row in peaks_df.iterrows()}
+    roi_to_peak = {roi: {'mzmed': mz, 'into': into} for roi, mz, into in
+                   zip(peaks_df['roi'].to_numpy(), peaks_df['mzmed'].to_numpy(), peaks_df['into'].to_numpy())}
     
-    for _, row in correlation_results.iterrows():
+    for roi_i, roi_k, delta_name, correlation in _table_rows(correlation_results, ['roi_i', 'roi_k', 'delta', 'correlation']):
         # Enforce isotope intensity hierarchy: lower m/z (main) must have higher intensity
-        roi_i, roi_k = row['roi_i'], row['roi_k']
-        delta_name = row['delta']
         
         # Fast peak lookup using pre-built dictionary
         peak_i = roi_to_peak.get(roi_i)
@@ -633,8 +683,17 @@ def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
             else:
                 continue  # Skip: isotope has higher intensity than main peak
 
+        if ratio_rule and delta_name in HEAVY_ISOTOPE_SHIFTS:
+            # one decision per pair, whichever of the 34S / 37Cl rows came first
+            if (main_roi, iso_roi) in heavy_pairs:
+                continue
+            heavy_pairs.add((main_roi, iso_roi))
+            delta_name = heavy_isotope_label(abs(peak_k['mzmed'] - peak_i['mzmed']), iso_into / main_into,
+                                             config.MZ_TOLERANCE, min_37cl_ratio)
+            if delta_name is None:
+                continue
         # Extra 37Cl filter (34S and 37Cl are close in m/z, so the intensity ratio can help distinguish them)
-        if delta_name == 'isotope_37Cl':
+        elif delta_name == 'isotope_37Cl':
             if (iso_into / main_into) < min_37cl_ratio:
                 # replace with 34S isotope
                 delta_name = 'isotope_34S'
@@ -643,7 +702,7 @@ def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
             'main_roi': main_roi,
             'iso_roi': iso_roi,
             'iso_name': delta_name,
-            'correlation': row['correlation']
+            'correlation': correlation
         })
     
     if show_progress:
@@ -741,15 +800,13 @@ def detect_adduct_patterns(peaks_df, raw_signals, valid_eic_mask, roi_to_idx, ma
         print(f"Found {len(correlation_results)} adduct pairs above correlation threshold in {correlation_time:.2f}s")
     
     # Convert to edge format
-    for _, row in correlation_results.iterrows():
-        roi_i, roi_k = row['roi_i'], row['roi_k']
-        
+    for roi_i, roi_k, delta, correlation in _table_rows(correlation_results, ['roi_i', 'roi_k', 'delta', 'correlation']):
         # Convert ROI values back to original DataFrame indices
         idx_i = roi_to_idx.get(roi_i, -1)
         idx_k = roi_to_idx.get(roi_k, -1)
         
         if idx_i != -1 and idx_k != -1:
-            edges.append((idx_i, idx_k, row['delta'], row['correlation']))
+            edges.append((idx_i, idx_k, delta, correlation))
     
     print(f"[TIMER] detect_adduct_patterns total took {time.time() - step_start:.4f}s")
     return edges
@@ -777,57 +834,38 @@ def detect_dimer_patterns(peaks_df, roi_to_idx, main_ions, signals_df, show_prog
     sorted_mz = sorted_peaks['mzmed'].values
     sorted_roi = sorted_peaks['roi'].values
     
+    sorted_rt = sorted_peaks['rtmeanw'].values
+    monomers = np.arange(len(sorted_mz))
+    adduct_h = config.ADDUCT_DIFFS.get('adduct_H', 1.00782)
+    tol = config.MZ_TOLERANCE
+
     candidate_pairs = []  # List of tuples (roi_i, roi_k, delta_name)
 
     # For each dimer type, find monomer-dimer pairs
     for dimer_name, correction in config.ACTIVE_DIMER_DIFFS.items():
         if show_progress:
             print(f"  Searching for {dimer_name} (correction: {correction:.5f})")
-        
-        # For each potential monomer peak
-        for i, monomer_row in sorted_peaks.iterrows():
-            monomer_mz = monomer_row['mzmed']
-            monomer_rt = monomer_row['rtmeanw']
-            monomer_roi = monomer_row['roi']
 
-            adduct_h = config.ADDUCT_DIFFS.get('adduct_H', 1.00782)
-            
-            
-            # Calculate expected dimer m/z: m_dimer = 2 * m_monomer + correction
-            if ionization_mode == 'positive':
-                expected_dimer_mz = 2 * (monomer_mz - adduct_h) + correction
-            elif ionization_mode == 'negative':
-                expected_dimer_mz = 2 * (monomer_mz + adduct_h) + correction
+        # Expected dimer m/z of every monomer: m_dimer = 2 * m_monomer + correction
+        if ionization_mode == 'positive':
+            expected = 2 * (sorted_mz - adduct_h) + correction
+        elif ionization_mode == 'negative':
+            expected = 2 * (sorted_mz + adduct_h) + correction
+        else:
+            raise ValueError(f"Unknown ionization mode: {ionization_mode}")
 
-            
-            # Binary search for peaks near expected dimer m/z
-            import bisect
-            left_idx = bisect.bisect_left(sorted_mz, expected_dimer_mz - config.MZ_TOLERANCE)
-            right_idx = bisect.bisect_right(sorted_mz, expected_dimer_mz + config.MZ_TOLERANCE)
-            
-            # Check all peaks in the m/z range
-            for j in range(left_idx, right_idx):
-                if j >= len(sorted_peaks):
-                    break
-                    
-                dimer_mz = sorted_mz[j]
-                dimer_roi = sorted_roi[j]
-                dimer_rt = sorted_peaks.iloc[j]['rtmeanw']
-                
-                # Skip self-matches
-                if monomer_roi == dimer_roi:
-                    continue
-                
-                # Check RT window constraint
-                rt_diff = abs(dimer_rt - monomer_rt)
-                if rt_diff > config.RT_WINDOW:
-                    continue
-                
-                # Check m/z tolerance
-                mz_diff = abs(dimer_mz - expected_dimer_mz)
-                if mz_diff <= config.MZ_TOLERANCE:
-                    # Add as tuple (roi_i, roi_k, delta_name) - format expected by compute_profile_correlations
-                    candidate_pairs.append((monomer_roi, dimer_roi, dimer_name))
+        # Peaks in the m/z range of each monomer (binary search), in the order of the monomers then of the m/z
+        left = np.searchsorted(sorted_mz, expected - tol, side='left')
+        right = np.searchsorted(sorted_mz, expected + tol, side='right')
+        count = right - left
+        ii = np.repeat(monomers, count)
+        jj = np.repeat(left, count) + (np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count))
+
+        # Skip self-matches, then RT window and m/z tolerance
+        keep = (sorted_roi[ii] != sorted_roi[jj]) & ~(np.abs(sorted_rt[jj] - sorted_rt[ii]) > config.RT_WINDOW) \
+            & (np.abs(sorted_mz[jj] - expected[ii]) <= tol)
+        # Add as tuple (roi_i, roi_k, delta_name) - format expected by compute_profile_correlations
+        candidate_pairs.extend((a, b, dimer_name) for a, b in zip(sorted_roi[ii[keep]], sorted_roi[jj[keep]]))
     
     if show_progress:
         print(f"Found {len(candidate_pairs)} dimer candidate pairs")
@@ -843,15 +881,13 @@ def detect_dimer_patterns(peaks_df, roi_to_idx, main_ions, signals_df, show_prog
     print(f"Found {len(correlation_results)} dimer pairs above correlation threshold {config.DIMER_CORR_THRESHOLD}")
     
     # Convert to edge format
-    for _, row in correlation_results.iterrows():
-        roi_i, roi_k = row['roi_i'], row['roi_k']
-        
+    for roi_i, roi_k, delta, correlation in _table_rows(correlation_results, ['roi_i', 'roi_k', 'delta', 'correlation']):
         # Convert ROI values back to original DataFrame indices  
         idx_i = roi_to_idx.get(roi_i, -1)
         idx_k = roi_to_idx.get(roi_k, -1)
         
         if idx_i != -1 and idx_k != -1:
-            edges.append((idx_i, idx_k, row['delta'], row['correlation']))
+            edges.append((idx_i, idx_k, delta, correlation))
     
     print(f"[TIMER] detect_dimer_patterns total took {time.time() - step_start:.4f}s")
     return edges
@@ -866,18 +902,46 @@ def edge_cut_score(edge_type, corr):
     return EDGE_CUT_PRIORITY.get(edge_type.split('_')[0], 1.0) * corr
 
 
-def limit_component_size(edges, peaks_df, K=200):
+def merge_under_size(edges, n_nodes, K):
     """
-    Break up connected components larger than K by cutting their weakest links.
+    Size-constrained single linkage: edges are taken from the strongest to the weakest and two groups are joined only
+    if the result holds at most K peaks (isotope edges always join). Every edge whose two ends end up in the same group
+    is kept, so oversized components are split along their weakest bridges instead of losing their peripheral peaks.
+    """
+    parent = list(range(n_nodes))
+    size = [1] * n_nodes
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i, j, edge_type, corr in sorted(edges, key=lambda e: -edge_cut_score(e[2], e[3])):
+        a, b = find(i), find(j)
+        if a == b or (size[a] + size[b] > K and np.isfinite(edge_cut_score(edge_type, corr))):
+            continue
+        if size[a] < size[b]:
+            a, b = b, a
+        parent[b] = a
+        size[a] += size[b]
+    return [e for e in edges if find(e[0]) == find(e[1])]
+
+
+def limit_component_size(edges, peaks_df, K=200, method='cut'):
+    """
+    Break up connected components larger than K.
 
     Isotope edges are never cut, while the remaining edges get a score combining the chemical priority of their type
-    with the profile correlation, and the lowest scoring ones inside oversized
-    components are dropped in batches until every component holds at most K peaks.
+    with the profile correlation. With method='cut' the lowest scoring edges inside oversized components are dropped
+    in batches until every component holds at most K peaks; with method='merge' components are rebuilt from the
+    strongest edges under the size limit (see merge_under_size).
 
     Args:
         edges: List of (idx_i, idx_j, edge_type_name, correlation) tuples
         peaks_df: DataFrame with peak information (kept for signature compatibility)
         K: Maximum component size
+        method: 'cut' or 'merge'
 
     Returns:
         limited_edges: List of edges after cutting
@@ -885,6 +949,13 @@ def limit_component_size(edges, peaks_df, K=200):
     """
     if not edges or K is None:
         return edges, {'components_processed': 0, 'components_split': 0, 'max_component_size': 0}
+
+    if method == 'merge':
+        limited_edges = merge_under_size(edges, len(peaks_df), K)
+        print(f"Cut {len(edges) - len(limited_edges)} edges")
+        return limited_edges, {'cut_edges': len(edges) - len(limited_edges)}
+    if method != 'cut':
+        raise ValueError(f"Unknown component split method: {method}")
 
     G = nx.Graph()
     G.add_nodes_from(range(len(peaks_df)))
@@ -896,22 +967,26 @@ def limit_component_size(edges, peaks_df, K=200):
     n_oversized = sum(1 for comp in components if len(comp) > K)
     print(f"Found {len(components)} components, {n_oversized} above K={K}")
 
+    # Only the oversized components can need a cut
+    H = G.subgraph(set().union(*(comp for comp in components if len(comp) > K))).copy()
     while True:
-        oversized_comps = [comp for comp in nx.connected_components(G) if len(comp) > K]
+        oversized_comps = [comp for comp in nx.connected_components(H) if len(comp) > K]
         if not oversized_comps:
             break
         oversized = set().union(*oversized_comps)
         # only edges sitting inside an oversized component are candidates
         cuttable = sorted(
-            (d['score'], u, v) for u, v, d in G.edges(data=True)
-            if u in oversized and np.isfinite(d['score'])
+            (d['score'], u, v) for u, v, d in G.edges(sorted(oversized), data=True)
+            if np.isfinite(d['score'])
         )
         if not cuttable:
             print(f"WARNING: {len(oversized)} nodes remain in oversized components with no cuttable edge left")
             break
         # one cut per K peaks in excess
         batch = max(1, sum(len(comp) // K for comp in oversized_comps))
-        G.remove_edges_from([(u, v) for _, u, v in cuttable[:batch]])
+        cut = [(u, v) for _, u, v in cuttable[:batch]]
+        G.remove_edges_from(cut)
+        H.remove_edges_from(cut)
 
     limited_edges = [(u, v, d['edge_type'], d['corr']) for u, v, d in G.edges(data=True)]
     sizes = [len(comp) for comp in nx.connected_components(G)]
@@ -1022,8 +1097,12 @@ def convert_to_pytorch_format(edges, peaks_df, raw_signals, signals_df, debug_ha
 
         print(f"Edge type encoding: {edge_type_encoding}")
         
-        # Fill arrays efficiently, converting array indices to ROI values
+        # Fill arrays efficiently, converting array indices to ROI values.
+        # Every edge goes from the lighter to the heavier ion, as in the graphs used to train the published model.
+        mz_values = peaks_df['mzmed'].values
         for idx, (i, j, edge_type, similarity) in enumerate(edges):
+            if mz_values[i] > mz_values[j]:
+                i, j = j, i
             edge_indices[0, idx] = idx_to_roi[i]  # Convert to ROI value
             edge_indices[1, idx] = idx_to_roi[j]  # Convert to ROI value
             similarities[idx] = similarity

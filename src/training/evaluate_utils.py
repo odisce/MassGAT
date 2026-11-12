@@ -1,4 +1,3 @@
-from sklearn.decomposition import PCA
 import torch
 import numpy as np
 import pandas as pd
@@ -219,6 +218,7 @@ def compute_qehf_peak_pca(model,qehf_graphs,qehf_gt,device='cpu',n_components=3,
     if len(all_embeddings) == 0:
         return None, None, None
 
+    from sklearn.decomposition import PCA
     emb_matrix = np.stack(all_embeddings)
     pca = PCA(n_components=n_components)
     pcs = pca.fit_transform(emb_matrix)

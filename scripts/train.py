@@ -52,6 +52,22 @@ def train_val_test_split(graphs, seed=42):
     
     return train_graphs, val_graphs, test_graphs
 
+def load_training_graphs(args):
+    """Labelled components from the synthetic folder and/or the real folders (same per-component format)."""
+    roots = ([args.synthetic_path] if args.use_synthetic else []) + list(args.real_path or [])
+    if not roots:
+        raise ValueError("No training data: give --real_path, or use --synthetic_path without --no_synthetic")
+    graphs, labels = [], []
+    for root in roots:
+        cache = os.path.splitext(root.rstrip('/\\'))[0] + '.pt'
+        if not os.path.isdir(root) and not (args.load_from_cache and os.path.isfile(cache)):
+            raise FileNotFoundError(f"Training data folder not found: {root}")
+        dataset = load_synthetic_dataset(root, load_from_cache=args.load_from_cache)
+        graphs.extend(dataset[i] for i in range(len(dataset)))
+        labels.extend(dataset.graph_labels)
+        print(f"  {root}: {len(dataset)} components")
+    return graphs, len(set(labels))
+
 def main(args):
     """Main training function with comprehensive seeding"""
     start_time = time.time()  # Start tracking total execution time
@@ -87,17 +103,13 @@ def main(args):
         # Load data with seeded split
         print("\n=== Data Loading ===")
         data_loading_start = time.time()
-        # Load data based on configuration
-        if args.use_synthetic:
-            dataset = load_synthetic_dataset(args.synthetic_path, load_from_cache=args.load_from_cache)
-            graphs = [dataset[i] for i in range(len(dataset))]  # Convert to list of Data objects
-            num_classes = dataset.get_num_classes()
+        graphs, num_classes = load_training_graphs(args)
 
         data_loading_end = time.time()
         print(f"Data loading completed (Time taken: {data_loading_end - data_loading_start:.2f}s)")
 
-        if len(graphs) < 1000:
-            print("Need at least 1000 graphs for training")
+        if len(graphs) < args.min_graphs:
+            print(f"Need at least {args.min_graphs} graphs for training, found {len(graphs)}")
             return
 
         # Split data with seed for reproducible fallback
@@ -132,7 +144,8 @@ def main(args):
             'model_type': args.model_type,
             'model_choice': args.model_choice,
             'encoder_type': args.encoder_type,
-            'synthetic_path': args.synthetic_path,
+            'synthetic_path': args.synthetic_path if args.use_synthetic else None,
+            'real_path': ','.join(args.real_path or []),
             'block_type': args.block_type,  # Added for ablation
             'zero_metadata_all_nodes': args.zero_metadata_all_nodes,
         }
@@ -293,7 +306,11 @@ if __name__ == "__main__":
                        help='Augmentation strategy')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument('--use_synthetic', action='store_true', default=True, help='Use synthetic data')
+    parser.add_argument('--no_synthetic', dest='use_synthetic', action='store_false', help='Train on the --real_path folders only')
     parser.add_argument('--synthetic_path', type=str, default='data/synthetic/synthetic_dataset', help='Path to synthetic data')
+    parser.add_argument('--real_path', type=str, nargs='+', default=None,
+                        help='Folder(s) of labelled real components, in the same per-component .pt format as the synthetic data')
+    parser.add_argument('--min_graphs', type=int, default=1000, help='Minimum number of components needed to train')
     parser.add_argument('--load_from_cache', action='store_true', default=False, help='Load data from cache if available')
     parser.add_argument('--model_type', type=str, default='hierarchical', choices=['hierarchical', 'contrastive'], help='Type of model to train')
     parser.add_argument('--model_choice', type=str, default='baseline', choices=['baseline', 'iterative', 'no_interaction'], help='GNN model choice')

@@ -76,7 +76,7 @@ MassGAT/
 
 MassGAT uses two configuration files:
 
-1. **[`config.yaml`](config.yaml)** — Analytical parameters (peak picking, graph construction, correlation thresholds). Changes are automatically detected by the trace segmentation and graph construction scripts, which will reprocess files accordingly. Use the `--force` flag to force reprocessing without changing config.
+1. **[`config.yaml`](config.yaml)** — Analytical parameters (peak picking, graph construction, correlation thresholds). Changes are automatically detected by the trace segmentation and graph construction scripts, which will reprocess files accordingly. Use the `--force` flag to force reprocessing without changing config. Set `MASSGAT_CONFIG=<file>` to use another parameter file. Large components are split to `graph.max_component_size` nodes, by cutting their weakest edges (`graph.component_split: cut`) or by merging nodes from the strongest edge under the size limit (`merge`, used for the annotation benchmark of the article); with `thresholds.isotope_label_rule: ratio`, a M+2 pair is labelled 34S, 37Cl (or 41K, kept as a 34S edge) from its intensity ratio.
 
 2. **[`mass_differences.xlsx`](src/mass_differences.xlsx)** — Chemical mass differences (isotopes, adducts, dimers). Entry names should use appropriate prefixes (`adduct_`, `loss_`, `mod_`) to define directionality in annotations. The file contains the following sheets:
    - **isotopes**: Isotope mass shifts (mode-independent). Columns: `name`, `mass_difference`, `frequency`
@@ -104,6 +104,11 @@ MassGAT uses two configuration files:
     python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_positive.pth --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations
     ```
 
+    For negative-mode data, build the graphs with `--ionization_mode negative` and use the same option at inference:
+    ```bash
+    python scripts/predict.py --folder data/test/graphs --data_type real --weights weights/model_negative.pth --output_dir data/test/results --min_node_prob 0.5 --with_top_annotations --ionization_mode negative
+    ```
+
     **Key inference arguments:**
 
     | Argument | Description | Default |
@@ -113,6 +118,7 @@ MassGAT uses two configuration files:
     | `--output_dir` | Directory where results will be saved | — |
     | `--min_node_prob` | Probability threshold above which a peak is kept | `0.5` |
     | `--with_top_annotations` | Also output top 5 candidate annotations per component | — |
+    | `--ionization_mode` | `positive` or `negative`, as used to build the graphs | `positive` |
 
 
 > **Note**
@@ -124,7 +130,7 @@ MassGAT uses two configuration files:
 
 - **Segmented ionshed features** in `.feather` format in subfolder `ionshed_output` of your project.
 - **Graph representations** in `.pt` format in subfolder `graphs` of your project.
-- **A final peak list** with detection probabilities and, if `--with_top_annotations` was used at Step 3, the top-ranked candidate annotations per component (main ion, isotopes, adducts, losses, dimers).
+- **A final peak list** with detection probabilities and, if `--with_top_annotations` was used at Step 3, the top-ranked candidate annotations per component (main ion, isotopes, adducts, losses, dimers). Each candidate main ion is also tested as [M+Na]+, [M+NH4]+ and [M+K]+ ([M+Cl]- and [M+HCOO]- in the negative mode) and scored by the ions it explains; ions that remove an atom the molecule does not carry, carry a wrong charge state (isotope spacing of 0.5) or gain a neutral molecule are inconsistent, and implausible ions are left out of the peak group.
 
 ### Training
 
@@ -181,9 +187,9 @@ To retrain MassGAT on custom or synthetic data, first generate synthetic trainin
 ## Performance & System Notes
 
 - Inference runs entirely on **CPU** — no GPU required.
-- Typical end-to-end runtime per file (segmentation + graph construction + inference + annotation), on 5 CPU cores:
-  - ~2.3 minutes for a Time-of-Flight (TOF) file
-  - ~8.4 minutes for an Orbitrap (QE HF) file
+- Typical end-to-end runtime per file (segmentation + graph construction + inference + annotation), on one CPU core (Intel Xeon Gold 6348):
+  - ~1.8 minutes for a Time-of-Flight (TOF) file (TripleTOF 6600)
+  - ~5.8 minutes for an Orbitrap (QE HF) file
 - The model itself is lightweight (~98,000 trainable parameters), so retraining is feasible on CPU-only machines as well.
 
 ---

@@ -9,10 +9,6 @@ from pathlib import Path
 import sys
 import time
 
-# For plotting
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 # Function to reindex graph nodes
 def reindex_graph(data_dict):
     """Reindex graph nodes using roi_values as the mapping."""
@@ -252,7 +248,7 @@ def load_mzml_file(path, min_component_size=1):
         new_edge_feats = torch.stack([log_into_ratio, log_imax_ratio, rt_diff], dim=1)
         final_edge_attr = torch.cat([global_edge_attr, new_edge_feats], dim=1) if global_edge_attr is not None else new_edge_feats
     else:
-        final_edge_attr = None
+        final_edge_attr = torch.empty((0, global_edge_attr.size(1) + 3)) if global_edge_attr is not None else None
 
     t3 = time.time()
     metrics['3_feature_engineering_time'] = t3 - t2
@@ -392,6 +388,8 @@ class GraphDataset(Dataset):
         self._plot_feature_distributions()
     def _plot_feature_distributions(self):
         """Plot and save distributions of log_into, log_imax, sc_length for all graphs."""
+        import matplotlib.pyplot as plt
+        import seaborn as sns
         if len(self.graphs) == 0:
             print("No graphs to plot feature distributions.")
             return
@@ -462,14 +460,16 @@ class GraphDataset(Dataset):
                 print(f"Loading progress: {idx+1}/{n_files} files ({100*(idx+1)//n_files}%)")
             try:
                 if not self.load_synthetic:
-                    subgraphs, times = load_mzml_file(pt_file)
+                    subgraphs, _ = load_mzml_file(pt_file)
                     if not subgraphs:
                         total_skipped += 1
                         continue
                     for data in subgraphs:
+                        is_true_graph = (data.y != -1).any().long().item()
                         data.graph_label = torch.tensor([is_true_graph], dtype=torch.long)
                         self.graphs.append(data)
-                        self.graph_labels.append(data.graph_label.item())
+                        self.graph_labels.append(is_true_graph)
+                    times = None
                 else:
                     data, times = load_single_synthetic_file(pt_file)
                     if data is None:

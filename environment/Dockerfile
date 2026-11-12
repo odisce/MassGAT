@@ -14,14 +14,25 @@ RUN pixi install --locked -e ${PIXI_ENV}
 # install R's XML/ncdf4 instead of compiling from source
 RUN pixi add -e ${PIXI_ENV} r-ncdf4 netcdf4 r-xml libxml2
 
+# system libraries needed by the R packages of IonShed
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev cmake make libuv1-dev libglpk-dev \
+       libxml2-dev pandoc libicu-dev libnetcdf-dev \
+    && rm -rf /var/lib/apt/lists/*
+ENV PKG_SYSREQS=false
+
 # change paths to force pixi to use the correct environment
 ENV PATH=/app/.pixi/envs/${PIXI_ENV}/bin:$PATH
 ENV PKG_CONFIG_PATH=/app/.pixi/envs/${PIXI_ENV}/lib/pkgconfig
 ENV CPATH=/app/.pixi/envs/${PIXI_ENV}/include
 ENV LIBRARY_PATH=/app/.pixi/envs/${PIXI_ENV}/lib
 ENV LD_LIBRARY_PATH=/app/.pixi/envs/${PIXI_ENV}/lib
+ENV PKG_SYSREQS=false
 
 RUN pixi run -e ${PIXI_ENV} install-ionshed
+
+# Compile the Python bytecode once
+RUN python -m compileall -q -j 0 --invalidation-mode checked-hash /app/.pixi/envs/${PIXI_ENV}/lib/python3* /app/src /app/scripts || true
 
 RUN pixi shell-hook -e ${PIXI_ENV} -s bash > /shell-hook \
     && echo "#!/bin/bash" > /app/entrypoint.sh \

@@ -1,9 +1,14 @@
 """
 Data loading, graph construction and augmentation
 """
-from .augmentation import augment_graph
-from .loader import load_synthetic_dataset, reindex_graph, load_mzml_file
-from .hierarchical_graph_construction import build_hierarchical_graph
+# Imported on first use, so that building graphs does not load torch_geometric
+_MODULES = {'augment_graph': '.augmentation', 'build_hierarchical_graph': '.hierarchical_graph_construction'}
+
+def __getattr__(name):
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+    return getattr(importlib.import_module(_MODULES.get(name, '.loader'), __name__), name)
 
 __all__ = [
     'reindex_graph', 

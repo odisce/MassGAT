@@ -13,8 +13,16 @@ from src.models import MassGAT, IndependentPeakClassifier
 from src.data.loader import load_single_synthetic_file, load_mzml_file
 from src.data.single_loader import SinglePeakDataset, extract_peaks_from_pt
 from src.training.trainer import ChroMSTrainer
-from src.utils.annotate_component import annotate_component
+from src.utils.annotate_component import annotate_component, doubly_charged
 from src.utils.common import read_feather
+
+
+def _charge_states(graphs):
+    """{roi: 2} for the doubly charged nodes among all the components of one file."""
+    x = torch.cat([g.x for g in graphs]).detach().cpu()
+    roi = torch.cat([g.roi_values for g in graphs]).cpu().numpy()
+    z2 = doubly_charged((x[:, 0] * 1000 + x[:, 6]).numpy(), (x[:, 1] * 1800).numpy(), torch.expm1(x[:, 2]).numpy())
+    return dict.fromkeys(roi[z2].tolist(), 2)
 
 
 def _validated_components(edge_index, valid_mask):
@@ -44,6 +52,20 @@ def _load_state_dict(path):
         if 'model_state_dict' in checkpoint:
             return checkpoint['model_state_dict']
     return checkpoint
+
+
+def _ionization_modes(pt_files, ionization_mode=None):
+    """Ionization mode of each graph file: the one given, else the one stored by build_graphs.py."""
+    modes = {}
+    for pt_file in pt_files:
+        name = os.path.basename(pt_file)
+        stored = torch.load(pt_file, map_location='cpu').get('ionization_mode')
+        if ionization_mode is not None and stored is not None and stored != ionization_mode:
+            print(f'WARNING: {name} was built in {stored} mode, annotated in {ionization_mode} mode as requested')
+        modes[name] = ionization_mode or stored
+        if modes[name] is None:
+            raise ValueError(f'No ionization mode stored in {name} (graph built by an older version): pass --ionization_mode')
+    return modes
 
 
 def _count_csv_data_rows(csv_path):
@@ -86,9 +108,9 @@ def _load_roi_mzmin_mzmax_mapping(ionshed_output_dir, file_name):
         # Create mapping: roi -> (mzmin, mzmax)
         roi_mapping = {}
         if 'roi' in df.columns and 'mzmin' in df.columns and 'mzmax' in df.columns:
-            for _, row in df.iterrows():
-                roi_id = int(row['roi'])
-                roi_mapping[roi_id] = (float(row['mzmin']), float(row['mzmax']))
+            roi_mapping = dict(zip(df['roi'].to_numpy().astype(np.int64).tolist(),
+                                   zip(df['mzmin'].to_numpy(dtype=np.float64).tolist(),
+                                       df['mzmax'].to_numpy(dtype=np.float64).tolist())))
         return roi_mapping
     except Exception as e:
         print(f"[DEBUG] Failed to load ROI mapping from {feather_path}: {e}")
@@ -229,6 +251,8 @@ def main(args):
         print(f'No .pt files found in {folder_path}')
         return
     print(f'Found {len(pt_files)} .pt files for prediction.')
+    annotate = (not skip_top_annotations) and data_type == 'real'
+    file_modes = _ionization_modes(pt_files, args.ionization_mode) if annotate else {}
 
     start_time = time.time()
     # Load graphs
@@ -293,6 +317,7 @@ def main(args):
                    'file_name', 'component_id', 'roi_id', 'node_prob', 'graph_prob'] + [f'top_annotation_{k+1}' for k in range(5)]
 
     n_meta_rows = 0
+    charges = {}
     t_annotations = 0.0
     t_metadata = 0.0
 
@@ -368,6 +393,8 @@ def main(args):
                             (fname, int(roi_ids[idx])): float(node_probs_arr[idx])
                             for idx in range(len(roi_ids))
                         }
+                        if fname not in charges:
+                            charges = {fname: _charge_states([g for g, f in zip(graphs, file_names) if f == fname])}
 
                         for piece in _validated_components(edge_index_np[:, keep_edge], valid_mask):
                             if len(piece) > args.max_annotation_size:
@@ -382,6 +409,12 @@ def main(args):
                                 roi_values=data_obj.roi_values,
                                 prob_threshold=args.min_node_prob,
                                 temperature=3.0,
+                                ionization_mode=file_modes[fname],
+                                ion_hypotheses='default',
+                                score_mode='explained',
+                                charge_states=charges[fname],
+                                plausibility=True,
+                                dimer_after_loss=False,
                             )
                             for k, hypothesis in enumerate(ranked[:5]):
                                 for roi_key, annotation in hypothesis['node_annotations'].items():
@@ -515,6 +548,9 @@ if __name__ == '__main__':
     parser.add_argument('--skip_top_annotations', action='store_true', default=True)
     parser.add_argument('--with_top_annotations', dest='skip_top_annotations', action='store_false')
     parser.add_argument('--output_per_file', action='store_true', default=False, help='Save one peak file per input file (named as input file) instead of combined output')
+    parser.add_argument('--ionization_mode', type=str, default=None, choices=['positive', 'negative'],
+                        help='Ionization mode used to build the graphs (edge names and charge of the annotations); '
+                             'default: the mode stored in each graph file by build_graphs.py')
     
     # Options for filtering and optimization
     parser.add_argument('--min_node_prob', type=float, default=0.5, help='Keep peaks with node_prob >= threshold')

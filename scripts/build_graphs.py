@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 import yaml
@@ -31,6 +33,18 @@ except ModuleNotFoundError:
 def log(message):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] {message}")
+
+
+def signals_by_roi(signals_df):
+    """{roi: (rt, intensity)} with the rows of each ROI in table order, as signals_df.groupby('roi') gives them."""
+    roi = signals_df["roi"].to_numpy()
+    rows = np.flatnonzero(~pd.isna(roi))
+    if rows.size == 0:
+        return {}
+    rows = rows[np.argsort(roi[rows], kind="stable")]
+    roi, rt, intensity = roi[rows], signals_df["rt"].to_numpy()[rows], signals_df["i"].to_numpy()[rows]
+    bounds = np.flatnonzero(np.r_[True, roi[1:] != roi[:-1], True])
+    return {roi[a]: (rt[a:b], intensity[a:b]) for a, b in zip(bounds[:-1], bounds[1:])}
 
 
 def find_matching_signal(peak_file):
@@ -68,7 +82,7 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
         log("ERROR: No *peak*.feather files found")
         return 1
     
-    config_path = Path(__file__).resolve().parents[1] / 'config.yaml'
+    config_path = Path(os.environ.get('MASSGAT_CONFIG') or Path(__file__).resolve().parents[1] / 'config.yaml')
     if config_path.exists():
         with open(config_path) as f:
             config = yaml.safe_load(f)
@@ -126,10 +140,7 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
                 skipped += 1
                 continue
 
-            raw_signals = {
-                roi: (g["rt"].values, g["i"].values)
-                for roi, g in signals_df.groupby("roi")
-            }
+            raw_signals = signals_by_roi(signals_df)
 
             limit_comp_size = None
             if isinstance(config, dict):
@@ -157,6 +168,7 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
                     "file_name": peak_file.name,
                     "n_peaks": len(peaks_df),
                     "n_edges": edge_index.shape[1],
+                    "ionization_mode": ionization_mode,
                 },
                 str(out_file),
             )

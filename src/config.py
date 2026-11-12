@@ -3,13 +3,14 @@ Configuration file for MassGAT project.
 Loads hyperparameters from config.yaml and constants for graph construction, model architecture, and training.
 """
 
+import os
 import torch
 import yaml
 from pathlib import Path
 
-# Load configuration from YAML
+# Load configuration from YAML (or from the file given by MASSGAT_CONFIG)
 def _load_config_yaml():
-    config_path = Path(__file__).parent.parent / 'config.yaml'
+    config_path = Path(os.environ.get('MASSGAT_CONFIG') or Path(__file__).parent.parent / 'config.yaml')
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with open(config_path, 'r') as f:
@@ -23,6 +24,7 @@ MZ_TOLERANCE = _CONFIG['graph']['mz_tolerance']
 EIC_LEN = _CONFIG['graph']['eic_len']
 MIN_SIGNALS = _CONFIG['graph']['min_signals']
 MAX_COMPONENT_SIZE = _CONFIG['graph'].get('max_component_size')
+COMPONENT_SPLIT = _CONFIG['graph'].get('component_split', 'cut')
 
 # Peak Picking parameters
 RTTOL = _CONFIG['peak_picking']['rttol']
@@ -36,6 +38,7 @@ ISOTOPE_CORR_THRESHOLD = _CONFIG['thresholds']['isotope_corr']
 ADDUCT_CORR_THRESHOLD = _CONFIG['thresholds']['adduct_corr']
 DIMER_CORR_THRESHOLD = _CONFIG['thresholds']['dimer_corr']
 ISOTOPE_37CL_MIN_RATIO = _CONFIG['thresholds']['isotope_37cl_ratio']
+ISOTOPE_LABEL_RULE = _CONFIG['thresholds'].get('isotope_label_rule', 'legacy')
 
 # Model inference parameters
 BATCH_SIZE_INFERENCE = _CONFIG['model']['batch_size_inference']

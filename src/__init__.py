@@ -11,22 +11,15 @@ try:
 except ImportError:
     pass
 
-# Modular imports - only import what exists
-try:
-    from .data import load_data
-    from .data.augmentation import augment_graph
-except ImportError:
-    pass
-
-try:
-    from .training import ChroMSTrainer, contrastive_loss
-except ImportError:
-    pass
-
-try:
-    from .utils import setup_mlflow, log_training_params, log_training_metrics
-except ImportError:
-    pass
+# Modular imports - only import what exists, on first use
+def __getattr__(name):
+    import importlib
+    for module in ('.utils', '.training', '.data', '.data.augmentation'):
+        try:
+            return getattr(importlib.import_module(module, __name__), name)
+        except (ImportError, AttributeError):
+            pass
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # Data handling
