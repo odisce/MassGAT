@@ -119,12 +119,11 @@ MassGAT uses two configuration files:
     | `--min_node_prob` | Probability threshold above which a peak is kept | `0.5` |
     | `--with_top_annotations` | Also output top 5 candidate annotations per component | — |
     | `--ionization_mode` | `positive` or `negative`, as used to build the graphs | `positive` |
+    | `--all_node_probs` | Also write `<output>_all_probs.tsv` with the probability of every ion (the other outputs are unchanged) | off |
 
 
 > **Note**
-> **For interactive visualization:** Once the results have been obtained by CLI, you can navigate through the results. To run the `visualization.ipynb` notebook in `docs/`. Select the (cpu or gpu) python Kernel, if modified, update the project name in `os.environ["PROJ_NAME"] = "test"` and run the notebook.
-
-
+> **For interactive visualization:** Once the results have been obtained by CLI, you can navigate through the results. To run the `visualization.ipynb` notebook in `docs/`. Select the (cpu or gpu) python Kernel, if modified, update the project name in `os.environ["PROJ_NAME"] = "test"` and run the notebook. Retention times are in seconds (also in the notebook search box).
 
 #### Outputs
 
@@ -174,9 +173,30 @@ To retrain MassGAT on custom or synthetic data, first generate synthetic trainin
     | `--encoder_type` | Signal encoder: `transformer` or `cnn` | `transformer` |
     | `--block_type` | GNN block type: `gate`, `gat`, or `gcn` | `gate` |
     | `--seed` | Random seed for reproducibility | `42` |
+    | `--real_path` | Folder(s) of labelled real components, in the same per-component `.pt` format as the synthetic data | — |
+    | `--no_synthetic` | Train on the `--real_path` folders only | — |
+
+    **Training on labelled real data**, alone or together with the synthetic components:
+    ```bash
+    python scripts/train.py --no_synthetic --real_path data/labelled_components --num_epochs 15 --seed 42
+    python scripts/train.py --synthetic_path synthetic_dataset --real_path data/labelled_components --num_epochs 15 --seed 42
+    ```
 
     Trained weights are saved to the `weights/` directory, named after the ionization `--mode` used during data generation (e.g. `model_positive.pth`, `model_negative.pth`) — matching the files you'd point `predict.py` at in Step 3 of the [Prediction](#prediction) section above.
 
+    **Settings of the released models.** The defaults above are those of the script, not those of the released weights. The weights in `weights/` were trained on 70% of the components (20% validation, 10% test) with Adam, a batch size of 64, hidden and embedding dimensions of 32 and 64, a weight decay of 1e-4 and the seed 42:
+
+    | | `model_positive.pth` | `model_negative.pth` |
+    |---|---|---|
+    | Learning rate | 5e-5, multiplied by 0.9 when the validation loss has not improved for 5 epochs | 5e-5 (not reduced) |
+    | Early stopping | patience 10, stopped at epoch 37 | patience 5, stopped at epoch 24 |
+    | Weights released | last epoch | last epoch |
+
+    The loss weights are `alpha = beta = gamma = 1` and `delta = 0.5` (Note S1 of the article). For the positive model:
+    ```bash
+    python scripts/train.py --use_synthetic --synthetic_path synthetic_dataset --real_path <labelled real components> --num_epochs 100 --early_stopping_patience 10 --batch_size 64 --learning_rate 5e-5 --hidden_dim 32 --embedding_dim 64 --seed 42
+    ```
+    (`--num_epochs` is only a maximum here). The real training data of the released models come from an in-house library that cannot be shared.
     **Tracking experiments with MLflow:**
     ```bash
     mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001

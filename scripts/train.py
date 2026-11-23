@@ -199,6 +199,7 @@ def main(args):
             num_epochs=config['num_epochs'],
             batch_size=config['batch_size'],
             augmentation=config['augmentation'],
+            early_stopping_patience=getattr(args, 'early_stopping_patience', 5),
         )
         training_end = time.time()
         print(f"Training completed (Time taken: {training_end - training_start:.2f}s)")
@@ -296,6 +297,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='MassGAT Modular Training')
     parser.add_argument('--learning_rate', type=float, default=0.0003, help='Learning rate')
     parser.add_argument('--num_epochs', type=int, default=15, help='Number of epochs')
+    parser.add_argument('--early_stopping_patience', type=int, default=5, help='Stop when the validation loss has not improved for this number of epochs')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
     parser.add_argument('--hidden_dim', type=int, default=48, help='Hidden dimension')
     parser.add_argument('--embedding_dim', type=int, default=24, help='Embedding dimension')

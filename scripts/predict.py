@@ -334,6 +334,14 @@ def main(args):
         meta_writer.writeheader()
         file_writers = None
 
+    # optional (off by default, nothing else changes): the probability of EVERY ion, rejected ones included
+    all_probs_cm, all_probs_writer = None, None
+    if args.all_node_probs:
+        all_probs_path = target_tsv.with_name(f"{target_tsv.stem}_all_probs.tsv")
+        all_probs_cm = open(all_probs_path, 'w', newline='')
+        all_probs_writer = csv.writer(all_probs_cm, delimiter='\t', lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
+        all_probs_writer.writerow(['file_name', 'roi_id', 'node_prob'])
+
     try:
         total_files = len(file_names)
         assembly_log_every = max(1, total_files // 20)  # every 5%
@@ -366,6 +374,10 @@ def main(args):
                 # align graph_prob to node_prob for singletons/isolated peaks
                 if num_peaks == 1 and node_probs_arr.size > 0:
                     graph_prob = float(node_probs_arr[0])
+
+                if all_probs_writer is not None:
+                    for roi, p_v in zip(roi_ids, node_probs_arr):
+                        all_probs_writer.writerow([fname, int(roi), float(p_v)])
 
                 if graph_prob is not None and graph_prob < args.min_graph_prob:
                     continue
@@ -507,6 +519,9 @@ def main(args):
                         f"{rate:.0f} rows/s | elapsed {elapsed:.1f}s | eta {remaining:.1f}s")
                         
     finally:
+        if all_probs_cm is not None:
+            all_probs_cm.close()
+            print(f'Probability of every ion saved to {all_probs_path}')
         if output_per_file:
             # Close all per-file writers
             for fname, (fm, fw) in file_writers.items():
@@ -554,6 +569,9 @@ if __name__ == '__main__':
     
     # Options for filtering and optimization
     parser.add_argument('--min_node_prob', type=float, default=0.5, help='Keep peaks with node_prob >= threshold')
+    parser.add_argument('--all_node_probs', action='store_true', default=False,
+                        help='also write <output>_all_probs.tsv with the probability of every ion (file_name, roi_id, node_prob), '
+                             'rejected ions included; the other outputs are unchanged')
     parser.add_argument('--min_graph_prob', type=float, default=0.0, help='Keep peaks in components with graph_prob >= threshold')
     parser.add_argument('--max_annotation_size', type=int, default=200, help='Skip annotation for validated components larger than this to prevent bottleneck')
     parser.add_argument('--ionshed_output_dir', type=str, default=None, help='Path to ionshed output directory containing _peak.feather files')

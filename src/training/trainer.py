@@ -10,7 +10,6 @@ from torch_geometric.loader import DataLoader
 
 from ..data.augmentation import augment_graph
 from .losses import full_hierarchical_loss
-from .evaluate_utils import get_matches_and_total
 from ..data import load_synthetic_dataset
 
 
@@ -361,13 +360,6 @@ class ChroMSTrainer:
         return result
 
 
-    def compute_training_pca_call(self, train_graphs, n_graphs=100, n_components=3, save_path=None):
-            """
-            Compute PCA of node embeddings for a sample of the training set.
-            """
-            from .evaluate_utils import compute_training_pca
-            return compute_training_pca(self.model, train_graphs, n_graphs=n_graphs, n_components=n_components, save_path=save_path)
-    
     def train(self, train_graphs, val_graphs, num_epochs=15, batch_size=1, 
               augmentation="mixed", early_stopping_patience=5):
         """Main training loop"""

@@ -1,16 +1,20 @@
 # MassGAT Configuration File - Core Parameters
+# Defaults: the setting used to annotate real data (isotopes 0.5, adducts and dimers 0.8, m/z tolerance 0.0015 Da,
+# components of at most 50 nodes, traces of at least 4 scans). The settings of the other benchmarks of the article are
+# in the configuration files of the reproduction archive (benchmark/config_*.yaml); select one with MASSGAT_CONFIG.
 
 # Graph Construction Parameters
 graph:
   rt_window: 5.0                    # Retention time window in seconds for finding neighbors
-  mz_tolerance: 0.001               # m/z tolerance in Da for mass difference edges
+  mz_tolerance: 0.0015              # m/z tolerance in Da for mass difference edges
   min_signals: 4                    # Minimum number of signals required per ROI
   eic_len: 32                       # Fixed length for EIC vectors after interpolation
-  max_component_size: 100          # Cut the weakest edges until components hold at most N peaks (null = no cutting)
+  max_component_size: 50            # Cut the weakest edges until components hold at most N peaks (null = no cutting)
+  component_split: merge            # 'merge' (peak groups merged after the cut) or 'cut'
 
 # Peak Picking Parameters (ionshed)
 peak_picking:
-  rttol: 5                          # Retention time tolerance
+  rttol: 5                          # Retention time tolerance in seconds
   ppm: 3                            # PPM for peak picking
   mz_res: 0.0001                    # m/z resolution
   rt_res: 0.1                       # Retention time resolution
@@ -18,10 +22,11 @@ peak_picking:
 
 # Correlation Thresholds (tune for linking behavior)
 thresholds:
-  isotope_corr: 0.6                # Correlation threshold for isotope linking
+  isotope_corr: 0.5                # Correlation threshold for isotope linking
   adduct_corr: 0.8                 # Correlation threshold for adduct linking
-  dimer_corr: 0.8                 # Correlation threshold for dimer linking
+  dimer_corr: 0.8                  # Correlation threshold for dimer linking
   isotope_37cl_ratio: 0.2          # 37Cl isotope minimum intensity ratio
+  isotope_label_rule: ratio        # M+2 isotopes labelled from their intensity ratio
 
 # Model Inference Parameters
 model:
