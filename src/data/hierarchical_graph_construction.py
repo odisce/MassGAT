@@ -665,6 +665,7 @@ def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
     validated_pairs = []
     min_37cl_ratio = getattr(config, 'ISOTOPE_37CL_MIN_RATIO', 0.2)
     ratio_rule = config.ISOTOPE_LABEL_RULE == 'ratio'
+    order_rule = getattr(config, 'ISOTOPE_INTENSITY_ORDER', True)
     heavy_pairs = set()
     
     roi_to_peak = {roi: {'mzmed': mz, 'into': into} for roi, mz, into in
@@ -682,13 +683,13 @@ def detect_isotope_patterns(peaks_df, signals_df, show_progress=True):
         
         # Determine if the ion with lower mz has a higher intensity than the isotope
         if peak_i["mzmed"] < peak_k["mzmed"]:
-            if peak_i['into'] > peak_k['into']:
+            if peak_i['into'] > peak_k['into'] or not order_rule:
                 main_roi, iso_roi = roi_i, roi_k
                 main_into, iso_into = peak_i['into'], peak_k['into']
             else:
                 continue  # Skip: isotope has higher intensity than main peak
         else:
-            if peak_i['into'] < peak_k['into']:
+            if peak_i['into'] < peak_k['into'] or not order_rule:
                 main_roi, iso_roi = roi_k, roi_i
                 main_into, iso_into = peak_k['into'], peak_i['into']
             else:

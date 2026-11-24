@@ -39,6 +39,7 @@ ADDUCT_CORR_THRESHOLD = _CONFIG['thresholds']['adduct_corr']
 DIMER_CORR_THRESHOLD = _CONFIG['thresholds']['dimer_corr']
 ISOTOPE_37CL_MIN_RATIO = _CONFIG['thresholds']['isotope_37cl_ratio']
 ISOTOPE_LABEL_RULE = _CONFIG['thresholds'].get('isotope_label_rule', 'legacy')
+ISOTOPE_INTENSITY_ORDER = _CONFIG['thresholds'].get('isotope_intensity_order', True)
 
 # Model inference parameters
 BATCH_SIZE_INFERENCE = _CONFIG['model']['batch_size_inference']

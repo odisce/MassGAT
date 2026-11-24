@@ -27,6 +27,7 @@ thresholds:
   dimer_corr: 0.8                  # Correlation threshold for dimer linking
   isotope_37cl_ratio: 0.2          # 37Cl isotope minimum intensity ratio
   isotope_label_rule: ratio        # M+2 isotopes labelled from their intensity ratio
+  isotope_intensity_order: true    # Lighter isotope must be the more intense (false for 13C-labelled data)
 
 # Model Inference Parameters
 model:
