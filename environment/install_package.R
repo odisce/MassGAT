@@ -11,6 +11,9 @@ if (!requireNamespace("pak", quietly = TRUE)) {
   install.packages("pak", ask = FALSE, type = pak_type)
 }
 if (.Platform$OS.type == "windows") {
+  # Rtools tools (sh, make) before those of the environment, for the packages built from source
+  rtools <- Sys.getenv("RTOOLS45_HOME", "C:/rtools45")
+  Sys.setenv(PATH = paste(file.path(rtools, "usr", "bin"), Sys.getenv("PATH"), sep = ";"))
   download.file(
     "https://github.com/odisce/ionshed/releases/download/v1.0.1/win_ionshed_1.0.1.zip",
     "ionshed.zip"

@@ -78,6 +78,10 @@ platforms = ["linux-64", "win-64"]
 [tool.pixi.feature.cpu.dependencies]
 pytorch-cpu = ">=2.0.0"
 
+# R packages only in the library of the environment, even if R_LIBS_USER points to the library of another R
+[tool.pixi.activation.env]
+R_LIBS_USER = "NULL"
+
 [tool.pixi.pypi-dependencies]
 massgat = { path = ".", editable = true }
 
