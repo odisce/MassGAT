@@ -40,9 +40,9 @@ load_config <- function(config_path = NULL) {
 
 save_config_metadata <- function(output_file, config, relevant_keys) {
     metadata_file <- sub("\\.feather$", ".config.json", output_file)
-    relevant_config <- config[relevant_keys]
+    relevant_config <- config$peak_picking[relevant_keys]
     relevant_config <- Filter(Negate(is.null), relevant_config)
-    writeLines(jsonlite::toJSON(relevant_config, pretty = TRUE), metadata_file)
+    writeLines(jsonlite::toJSON(relevant_config, pretty = TRUE, digits = NA), metadata_file)
 }
 
 config_changed <- function(output_file, config, relevant_keys) {
@@ -52,8 +52,10 @@ config_changed <- function(output_file, config, relevant_keys) {
     }
     tryCatch({
         stored_config <- jsonlite::fromJSON(readLines(metadata_file))
-        current_config <- config[relevant_keys]
+        current_config <- config$peak_picking[relevant_keys]
         current_config <- Filter(Negate(is.null), current_config)
+        # Through JSON as the stored settings, so that 6 and 6.0 compare equal
+        current_config <- jsonlite::fromJSON(jsonlite::toJSON(current_config, digits = NA))
         return(!identical(stored_config, current_config))
     }, error = function(e) {
         return(TRUE)
@@ -160,8 +162,60 @@ process_file <- function(file_path, output_folder, force = FALSE, config = NULL)
     })
 }
 
+# process_file() run in a worker process, its messages returned with the result.
+# One BiocParallel worker per process: by default MSnbase would start one worker per core of the machine for each file.
+process_file_logged <- function(file_path, output_folder, force) {
+    BiocParallel::register(BiocParallel::SerialParam())
+    log_lines <- utils::capture.output(
+        result <- process_file(file_path, output_folder, force = force, config = config)
+    )
+    result$log <- log_lines
+    result
+}
+
+# Process the files in parallel, one file per worker process (fork on Linux/macOS, PSOCK cluster on Windows).
+# Results come back in the order of ms_files; the messages of each file are printed when all files are done.
+process_files_parallel <- function(ms_files, output_folder, force, cores) {
+    cat("Processing", length(ms_files), "files with", cores, "worker processes\n")
+    if (.Platform$OS.type == "windows") {
+        cl <- parallel::makePSOCKcluster(cores)
+        on.exit(parallel::stopCluster(cl), add = TRUE)
+        parallel::clusterEvalQ(cl, {
+            suppressPackageStartupMessages({
+                library(ionshed)
+                library(arrow)
+                library(MSnbase)
+                library(yaml)
+            })
+            NULL
+        })
+        parallel::clusterExport(cl, c("process_file", "process_file_logged", "config_changed", "save_config_metadata",
+                                      "config", "RTTOL", "PPM", "MZ_RES", "RT_RES", "XIC_RTTOL"), envir = globalenv())
+        results <- parallel::parLapply(cl, ms_files, process_file_logged, output_folder, force)
+    } else {
+        results <- parallel::mclapply(ms_files, process_file_logged, output_folder, force,
+                                      mc.cores = cores, mc.preschedule = FALSE)
+    }
+    for (i in seq_along(ms_files)) {
+        result <- results[[i]]
+        if (!is.list(result) || is.null(result$status)) {
+            # The worker itself failed (e.g. killed when out of memory)
+            result <- list(status = "error", file = sub("\\.(mzML|mzXML)$", "", basename(ms_files[i]), ignore.case = TRUE),
+                           error = paste(as.character(result), collapse = " "))
+            results[[i]] <- result
+        }
+        cat("\n--- File", i, "of", length(ms_files), "---\n")
+        cat("File:", basename(ms_files[i]), "\n")
+        if (length(result$log) > 0) {
+            cat(result$log, sep = "\n")
+        }
+        cat(switch(result$status, success = "SUCCESS", skipped = "SKIPPED", "ERROR"), "\n", sep = "")
+    }
+    results
+}
+
 # Function to process all mzML/mzXML files in a directory
-process_all_files <- function(input_folder, output_folder, force = FALSE) {
+process_all_files <- function(input_folder, output_folder, force = FALSE, cores = 1) {
     cat("=======================================================\n")
     cat("Ionshed Batch Processing\n")
     cat("=======================================================\n")
@@ -199,8 +253,11 @@ process_all_files <- function(input_folder, output_folder, force = FALSE) {
     results <- list()
     start_time <- Sys.time()
     
-    # Process each file
-    for (i in seq_along(ms_files)) {
+    cores <- max(1L, min(as.integer(cores), parallel::detectCores() - 1L, length(ms_files), na.rm = TRUE))
+    # Process each file (one file per worker process when cores > 1)
+    if (cores > 1) {
+        results <- process_files_parallel(ms_files, output_folder, force, cores)
+    } else for (i in seq_along(ms_files)) {
         file_path <- ms_files[i]
         
         cat("\n--- Processing file", i, "of", length(ms_files), "---\n")
@@ -283,6 +340,24 @@ main <- function() {
         args <- args[args != "--force"]
     }
     
+    # --cores N (or --cores=N): number of files processed in parallel
+    cores <- 1L
+    i_cores <- grep("^--cores", args)
+    if (length(i_cores) > 0) {
+        value <- sub("^--cores=?", "", args[i_cores[1]])
+        drop <- i_cores[1]
+        if (!nzchar(value)) {
+            value <- args[i_cores[1] + 1]
+            drop <- c(drop, i_cores[1] + 1)
+        }
+        cores <- suppressWarnings(as.integer(value))
+        if (is.na(cores) || cores < 1) {
+            cat("ERROR: --cores needs a positive integer.\n")
+            quit(status = 1)
+        }
+        args <- args[-drop]
+    }
+    
     # 2. Check if running in container environment or via CLI args
     if (file.exists("/workspace") && file.exists("/data")) {
         cat("Running in Singularity container environment\n")
@@ -293,7 +368,7 @@ main <- function() {
         output_folder <- args[2]
     } else {
         cat("ERROR: Missing arguments.\n")
-        cat("Usage: Rscript ionshed_batch_processing.R <input_folder> <output_folder> [--force]\n")
+        cat("Usage: Rscript ionshed_batch_processing.R <input_folder> <output_folder> [--force] [--cores N]\n")
         quit(status = 1)
     }
     
@@ -309,7 +384,7 @@ main <- function() {
     exit_code <- 0
     tryCatch({
         # Process all files
-        results <- process_all_files(input_folder, output_folder, force = force)
+        results <- process_all_files(input_folder, output_folder, force = force, cores = cores)
         
         # Exit with appropriate code
         error_count <- sum(sapply(results, function(x) x$status == "error"))

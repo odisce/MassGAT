@@ -211,6 +211,7 @@ To retrain MassGAT on custom or synthetic data, first generate synthetic trainin
   - ~1.8 minutes for a Time-of-Flight (TOF) file (TripleTOF 6600)
   - ~5.8 minutes for an Orbitrap (QE HF) file
 - The model itself is lightweight (~98,000 trainable parameters), so retraining is feasible on CPU-only machines as well.
+- Several files can be processed in parallel with `--cores N` (`ionshed_batch_processing.R`) and `--n_jobs N` (`build_graphs.py`). The outputs are the same as on one core; memory grows with N.
 
 ---
 

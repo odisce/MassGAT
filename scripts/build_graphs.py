@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -71,7 +73,83 @@ def find_matching_signal(peak_file):
     return None
 
 
-def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, force=False):
+def build_one(peak_file, signal_file, out_file, config, ionization_mode, eic_extraction_mode, log_fn=log):
+    """Build and save the graph of one peak/signal pair; returns 'processed', 'skipped' or 'failed'."""
+    try:
+        peaks_df = read_feather(peak_file)
+        signals_df = read_feather(signal_file)
+
+        if "sc_length" in peaks_df.columns:
+            peaks_df = peaks_df[peaks_df["sc_length"] >= MIN_SIGNALS]
+            filtered_rois = set(peaks_df["roi"])
+            signals_df = signals_df[signals_df["roi"].isin(filtered_rois)]
+
+        if peaks_df.empty:
+            log_fn(f"SKIP: No peaks left after filtering for {peak_file.name}")
+            return "skipped"
+
+        raw_signals = signals_by_roi(signals_df)
+
+        limit_comp_size = None
+        if isinstance(config, dict):
+            limit_comp_size = config.get('graph', {}).get('max_component_size', None)
+
+        edge_index, edge_attr, node_features, roi_values = build_hierarchical_graph(
+            peaks_df,
+            raw_signals,
+            signals_df,
+            file_id=None,
+            show_progress=False,
+            ionization_mode=ionization_mode,
+            limit_component_size_value=limit_comp_size,
+            eic_extraction_mode=eic_extraction_mode,
+        )
+
+        torch.save(
+            {
+                "edge_index": edge_index,
+                "edge_attr": edge_attr,
+                "node_features": node_features,
+                "roi_values": torch.from_numpy(roi_values),
+                "ground_truth_labels": None,
+                "positive_mask": None,
+                "file_name": peak_file.name,
+                "n_peaks": len(peaks_df),
+                "n_edges": edge_index.shape[1],
+                "ionization_mode": ionization_mode,
+            },
+            str(out_file),
+        )
+        if config:
+            save_config_metadata(out_file, config, ['graph', 'thresholds'])
+        log_fn(f"Saved: {out_file}")
+        return "processed"
+
+    except Exception as exc:
+        log_fn(f"ERROR processing {peak_file.name}: {exc}")
+        return "failed"
+
+
+def _init_worker():
+    torch.set_num_threads(1)
+
+
+def _build_one_worker(*args):
+    """build_one in a child process; the log lines are returned to the parent instead of printed."""
+    lines = []
+
+    def collect(message):
+        lines.append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+
+    try:
+        status = build_one(*args, log_fn=collect)
+    except BaseException as exc:  # never let one file stop the pool
+        collect(f"ERROR processing {args[0].name}: {exc}")
+        status = "failed"
+    return status, lines
+
+
+def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, force=False, n_jobs=1):
 
     start = time.time()
     peak_files = sorted(input_dir.glob("*peak*.feather"))
@@ -105,9 +183,9 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
     output_dir.mkdir(parents=True, exist_ok=True)
     existing = {p.stem for p in output_dir.glob("graph_*.pt")}
 
-    processed = 0
-    skipped = 0
-    failed = 0
+    counts = {"processed": 0, "skipped": 0, "failed": 0}
+    n_jobs = max(1, min(n_jobs, (os.cpu_count() or 1) - 1))
+    jobs = []
 
     for idx, (peak_file, signal_file) in enumerate(file_pairs, start=1):
         log(f"--- Processing {idx}/{len(file_pairs)}: {peak_file.name} ---")
@@ -123,64 +201,37 @@ def build_graphs(input_dir, output_dir, ionization_mode, eic_extraction_mode, fo
         
         if skip:
             log(f"SKIP: {out_file.name} already exists")
-            skipped += 1
+            counts["skipped"] += 1
             continue
 
-        try:
-            peaks_df = read_feather(peak_file)
-            signals_df = read_feather(signal_file)
+        job = (peak_file, signal_file, out_file, config, ionization_mode, eic_extraction_mode)
+        if n_jobs == 1:
+            counts[build_one(*job)] += 1
+        else:
+            jobs.append(job)
 
-            if "sc_length" in peaks_df.columns:
-                peaks_df = peaks_df[peaks_df["sc_length"] >= MIN_SIGNALS]
-                filtered_rois = set(peaks_df["roi"])
-                signals_df = signals_df[signals_df["roi"].isin(filtered_rois)]
+    if jobs:
+        # One file per task, one BLAS/torch thread per process; each child writes its own .pt file.
+        for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+            os.environ[var] = "1"
+        n_workers = min(n_jobs, len(jobs))
+        log(f"Building {len(jobs)} graphs with {n_workers} processes")
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx, initializer=_init_worker) as pool:
+            futures = {pool.submit(_build_one_worker, *job): job[0] for job in jobs}
+            for future in as_completed(futures):
+                peak_file = futures[future]
+                try:
+                    status, lines = future.result()
+                except Exception as exc:
+                    status, lines = "failed", []
+                    log(f"ERROR processing {peak_file.name}: {exc}")
+                log(f"--- Done: {peak_file.name} ---")
+                for line in lines:
+                    print(line)
+                counts[status] += 1
 
-            if peaks_df.empty:
-                log(f"SKIP: No peaks left after filtering for {peak_file.name}")
-                skipped += 1
-                continue
-
-            raw_signals = signals_by_roi(signals_df)
-
-            limit_comp_size = None
-            if isinstance(config, dict):
-                limit_comp_size = config.get('graph', {}).get('max_component_size', None)
-
-            edge_index, edge_attr, node_features, roi_values = build_hierarchical_graph(
-                peaks_df,
-                raw_signals,
-                signals_df,
-                file_id=None,
-                show_progress=False,
-                ionization_mode=ionization_mode,
-                limit_component_size_value=limit_comp_size,
-                eic_extraction_mode=eic_extraction_mode,
-            )
-
-            torch.save(
-                {
-                    "edge_index": edge_index,
-                    "edge_attr": edge_attr,
-                    "node_features": node_features,
-                    "roi_values": torch.from_numpy(roi_values),
-                    "ground_truth_labels": None,
-                    "positive_mask": None,
-                    "file_name": peak_file.name,
-                    "n_peaks": len(peaks_df),
-                    "n_edges": edge_index.shape[1],
-                    "ionization_mode": ionization_mode,
-                },
-                str(out_file),
-            )
-            if config:
-                save_config_metadata(out_file, config, ['graph', 'thresholds'])
-            log(f"Saved: {out_file}")
-            processed += 1
-
-        except Exception as exc:
-            log(f"ERROR processing {peak_file.name}: {exc}")
-            failed += 1
-
+    processed, skipped, failed = counts["processed"], counts["skipped"], counts["failed"]
     total_min = (time.time() - start) / 60.0
     log("==================================================")
     log("General processing completed")
@@ -212,6 +263,12 @@ def parse_args():
         default=False,
         help="Force reprocessing even if output files already exist",
     )
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=1,
+        help="Number of files processed in parallel, one process per file (at most cpu_count - 1)",
+    )
     return parser.parse_args()
 
 
@@ -226,6 +283,7 @@ def main():
         args.ionization_mode,
         args.eic_extraction_mode,
         force=args.force,
+        n_jobs=args.n_jobs,
     )
 
 
