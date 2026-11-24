@@ -174,6 +174,10 @@ def collect_candidate_peak_pairs(peaks_df, mz_deltas, dimer_specs=None, mz_toler
 
 
 
+# Profiles cover whole blocks of the grid, so that np.dot on an overlap sums as on the full grid (same bits)
+PROFILE_BLOCK = 64
+
+
 def precompute_intensity_profiles(signals_df, roi_list, rt_grid=None):
     import time
     step_start = time.time()
@@ -187,7 +191,8 @@ def precompute_intensity_profiles(signals_df, roi_list, rt_grid=None):
     
     Returns:
         rt_grid: Common RT grid used for interpolation
-        profiles: Dict mapping roi -> interpolated intensity profile
+        profiles: Dict mapping roi -> (start, values), the interpolated intensity profile on
+            rt_grid[start:start + len(values)], zero elsewhere on the grid
     """
     if not roi_list:
         return np.array([]), {}
@@ -199,7 +204,7 @@ def precompute_intensity_profiles(signals_df, roi_list, rt_grid=None):
     filter_time = time.time() - filter_start
     
     if signals_filtered.empty:
-        return np.array([]), {roi: np.array([]) for roi in roi_list}
+        return np.array([]), {roi: (0, np.array([])) for roi in roi_list}
     
     # Sort signals by RT once
     sort_start = time.time()
@@ -228,17 +233,21 @@ def precompute_intensity_profiles(signals_df, roi_list, rt_grid=None):
     
     print(f"  Preprocessing: filter={filter_time:.2f}s, sort={sort_time:.2f}s, groupby={groupby_time:.2f}s, grid={grid_time:.2f}s, pregroup={pregroup_time:.2f}s")
 
-    # Interpolate on common RT grid
+    # Interpolate on the blocks of the common RT grid covering each trace
     interp_start = time.time()
     profiles = {}
     interp_count = 0
+    n_grid = len(rt_grid)
     for roi in roi_list:
         if roi in roi_slices:
             a, b = roi_slices[roi]
-            profiles[roi] = np.interp(rt_grid, rt_arr[a:b], i_arr[a:b], left=0, right=0)
+            start = np.searchsorted(rt_grid, rt_arr[a], side='left') // PROFILE_BLOCK * PROFILE_BLOCK
+            stop = np.searchsorted(rt_grid, rt_arr[b - 1], side='right')
+            stop = min(n_grid, (stop + PROFILE_BLOCK - 1) // PROFILE_BLOCK * PROFILE_BLOCK)
+            profiles[roi] = (start, np.interp(rt_grid[start:stop], rt_arr[a:b], i_arr[a:b], left=0, right=0))
             interp_count += 1
         else:
-            profiles[roi] = np.zeros_like(rt_grid)
+            profiles[roi] = (0, np.array([]))
     
     interp_time = time.time() - interp_start
     print(f"  Interpolation: {interp_time:.2f}s for {interp_count}/{len(roi_list)} ROIs (RT grid size: {len(rt_grid)})")
@@ -276,8 +285,7 @@ def compute_profile_correlations(candidate_pairs, signals_df, min_corr=0.6):
     # Precompute norms
     norms = {}
     for roi in all_rois:
-        profile = profiles[roi]
-        norms[roi] = np.linalg.norm(profile) if profile is not None else 0.0
+        norms[roi] = np.linalg.norm(profiles[roi][1])
 
     # Compute correlations
     results = []
@@ -287,10 +295,13 @@ def compute_profile_correlations(candidate_pairs, signals_df, min_corr=0.6):
         norm_j = norms.get(roi_j, 0.0)
         if norm_i == 0 or norm_j == 0:
             continue
-        # Correlation computation
-        profile_i = profiles[roi_i]
-        profile_j = profiles[roi_j]
-        corr = np.dot(profile_i, profile_j) / (norm_i * norm_j)
+        # Correlation computed on the overlap of the two profiles
+        start_i, profile_i = profiles[roi_i]
+        start_j, profile_j = profiles[roi_j]
+        lo = max(start_i, start_j)
+        hi = min(start_i + len(profile_i), start_j + len(profile_j))
+        dot = np.dot(profile_i[lo - start_i:hi - start_i], profile_j[lo - start_j:hi - start_j]) if hi > lo else 0.0
+        corr = dot / (norm_i * norm_j)
         if corr >= min_corr:
             results.append({
                 "roi_i": roi_i,
